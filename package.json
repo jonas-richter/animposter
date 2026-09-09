@@ -11,7 +11,8 @@
     "check:images": "node scripts/check-images.mjs",
     "test:api": "node scripts/e2e-api-test.mjs",
     "test:ui": "node scripts/run-ui-test.mjs",
-    "test": "npm run test:api && npm run test:ui"
+    "test": "npm run test:unit && npm run test:api && npm run test:ui",
+    "test:unit": "node scripts/run-unit-test.mjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.34.3",

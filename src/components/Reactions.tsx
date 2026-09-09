@@ -13,16 +13,33 @@ const COOLDOWN_MS = 2500;
  */
 export function ReactionLayer({ reactions }: { reactions: Reaction[] }) {
   const seen = useRef<Set<string>>(new Set());
-  const [live, setLive] = useState<(Reaction & { x: number; dur: number })[]>([]);
+  const [live, setLive] = useState<
+    (Reaction & {
+      x: number;
+      dur: number;
+      sway: number;
+      dir: number;
+      tilt: number;
+      scale: number;
+      rise: number;
+    })[]
+  >([]);
 
   useEffect(() => {
     const fresh = reactions.filter((r) => !seen.current.has(r.id));
     if (fresh.length === 0) return;
     for (const r of fresh) seen.current.add(r.id);
+    // Live-stream style: each emote gets its own lane, sway width, direction,
+    // tilt and size, so a burst of taps never looks like a marching column.
     const withPos = fresh.map((r) => ({
       ...r,
       x: 8 + Math.random() * 78,
-      dur: 2600 + Math.random() * 900,
+      dur: 2800 + Math.random() * 1400,
+      sway: 26 + Math.random() * 46,
+      dir: Math.random() > 0.5 ? 1 : -1,
+      tilt: (Math.random() - 0.5) * 26,
+      scale: 0.82 + Math.random() * 0.5,
+      rise: 42 + Math.random() * 22,
     }));
     setLive((cur) => [...cur, ...withPos].slice(-24));
     const timers = withPos.map((r) =>
@@ -38,7 +55,16 @@ export function ReactionLayer({ reactions }: { reactions: Reaction[] }) {
         <span
           key={r.id}
           className="reaction"
-          style={{ left: `${r.x}%`, animationDuration: `${r.dur}ms` }}
+          style={
+            {
+              left: `${r.x}%`,
+              animationDuration: `${r.dur}ms`,
+              '--sway': `${r.sway * r.dir}px`,
+              '--tilt': `${r.tilt}deg`,
+              '--scale': r.scale,
+              '--rise': `${r.rise}vh`,
+            } as React.CSSProperties
+          }
         >
           <span className="emoji">{r.emoji}</span>
           <span className="who">{r.seatName}</span>

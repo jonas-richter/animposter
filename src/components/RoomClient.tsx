@@ -329,14 +329,23 @@ export default function RoomClient({ code }: { code: string }) {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`/api/qr?code=${code}`} alt={`QR-Code für Raum ${code}`} />
             </div>
-            <button className="block" onClick={shareLink}>
-              {copied ? '✓ Link kopiert' : 'Link teilen'}
-            </button>
-            {view.isGm && (
-              <a className="tv-link" href={`/host/${code}`} target="_blank" rel="noreferrer">
-                📺 TV-Ansicht öffnen
-              </a>
-            )}
+            <div className="row">
+              <button className="grow" onClick={shareLink}>
+                {copied ? '✓ Link kopiert' : 'Link teilen'}
+              </button>
+              {view.isGm && (
+                <a
+                  className="tv-link"
+                  href={`/host/${code}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="TV-Ansicht öffnen"
+                  aria-label="TV-Ansicht öffnen"
+                >
+                  📺
+                </a>
+              )}
+            </div>
           </div>
 
           <div className="stack">

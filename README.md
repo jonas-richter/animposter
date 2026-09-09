@@ -333,11 +333,72 @@ Die Bilder sind urheberrechtlich geschützt und werden von Fandom aus eingebunde
 Für einen privaten Spieleabend ist das unproblematisch; für etwas Öffentliches solltest du eigene
 oder lizenzfreie Bilder eintragen.
 
+## 6b. Admin-Backend
+
+Unter `/admin` gibt es ein Moderationswerkzeug. Es ist **komplett deaktiviert**, solange keine
+Umgebungsvariable `ADMIN_PASSWORD` gesetzt ist.
+
+**Einrichten:** In Vercel unter *Settings → Environment Variables* `ADMIN_PASSWORD` anlegen
+(mindestens 8 Zeichen), neu deployen, dann `deine-url/admin` aufrufen.
+
+Es gibt keine Benutzerkonten und keine Passwortspeicherung: das Passwort steht nur in der
+Umgebungsvariable, der Vergleich läuft zeitkonstant, und die Sitzung ist ein signiertes Cookie —
+also auch kein Sitzungsspeicher, der auslaufen könnte. Anmeldeversuche sind begrenzt.
+
+Im Panel siehst du:
+
+- **Laufende Räume** mit Phase, Spielern, Punkten und Geräten.
+- **Unsichtbar zuschauen** — du trittst dem Raum als Beobachter bei, der in keiner Spielerliste
+  auftaucht. Du siehst dabei alle Rollen.
+- **Eigene Themen dauerhaft machen** — ein Thema aus einem Raum wandert in die globale
+  Bibliothek und steht ab dann in jedem neuen Raum zur Wahl. Rückgängig mit einem Klick.
+- **Verlauf** der letzten Runden (Thema, Spieler, wer Impostor war).
+- **KI-Themen für alle** freischalten, falls ein Schlüssel hinterlegt ist.
+
+### Was gespeichert wird — und was nicht
+
+| Gespeichert | Nicht gespeichert |
+| --- | --- |
+| Selbst gewählter Spielername | **IP-Adresse** |
+| Land der Verbindung (`DE`, `AT`, …) | Standort, Gerätekennungen |
+| Browserkennung (User-Agent) | Cookies für Tracking |
+| Spielverlauf des Raums | Irgendetwas bei Dritten |
+
+Die IP wird nur kurz im Arbeitsspeicher für die Missbrauchsgrenzen verwendet und nirgends
+abgelegt. Der Rundenverlauf löscht sich nach **7 Tagen** von selbst (Redis-TTL), Räume nach
+spätestens 8 Stunden Inaktivität.
+
+Unter `/datenschutz` liegt eine passende Erklärung, verlinkt unten auf der Startseite. Weil es
+weder Analyse-Werkzeuge noch eingebettete Fremdinhalte gibt, kommt die App **ohne Cookie-Banner**
+aus — die Charakterbilder laufen dafür über einen eigenen Bild-Proxy (`/api/img`), sodass die
+Geräte deiner Spieler nie eine Verbindung zu Fandom aufbauen. Ich bin kein Anwalt; das ist eine
+technische Einschätzung, keine Rechtsberatung.
+
+### Missbrauchsgrenzen
+
+Räume pro Stunde, Beitritte, eigene Themen, KI-Aufrufe und Login-Versuche sind pro Client
+begrenzt. Die Werte sind so gesetzt, dass ein normaler Spieler sie nie bemerkt — und lokal
+sowie in den Tests greifen sie gar nicht, weil dort keine Proxy-Header ankommen.
+
+### KI-Themengenerator (optional)
+
+Mit `LLM_API_KEY` erscheint im „Eigenes Thema"-Dialog ein dritter Reiter. Ohne Schlüssel ist die
+Funktion unsichtbar. Standardmäßig sieht sie nur der angemeldete Admin; im Panel lässt sie sich
+für alle freigeben. Jeder Aufruf ist pro Client auf 8 pro Tag begrenzt, damit ein öffentlich
+erreichbarer Endpunkt dein Kontingent nicht leersaugt. Kostenlose Anbieter ohne Kreditkarte gibt
+es reichlich (Groq, Google AI Studio, OpenRouter) — Konfiguration siehe `.env.example`.
+
+Die Antwort der KI läuft durch **dieselbe strenge Validierung** wie ein eingefügtes JSON. Ein
+Sprachmodell ist auch nur eine unbekannte Quelle.
+
 ## 7. Tests
 
 ```bash
+npm run test:unit  # braucht keinen Server
+
 npm run build
-npm start          # Terminal 1
+npm start                                  # Terminal 1
+ADMIN_PASSWORD=test-admin-passwort npm start   # falls du auch /admin testen willst
 
 npm run test:api   # Terminal 2 – Server-/Spiel-Logik + Sicherheit
 npm run test:ui    # Terminal 2 – kompletter Durchlauf durch die echte UI
@@ -345,9 +406,11 @@ npm run test:ui    # Terminal 2 – kompletter Durchlauf durch die echte UI
 
 - **`test:api`** spielt zwei komplette Runden über die HTTP-API und prüft unter anderem, dass ein
   Client niemals fremde Rollen, die Impostor-Liste oder die Auflösung im Payload bekommt.
-- **`test:ui`** rendert die echten React-Komponenten (drei „Handys" gleichzeitig) und klickt eine
-  Runde von der Lobby bis zur Auflösung durch – inklusive Weitergabe-Screens, Zahnrad-Menü,
-  Reconnect und ein Gerät, das alle vier Spieler abdeckt.
+- **`test:ui`** rendert die echten React-Komponenten (drei „Handys" gleichzeitig plus den
+  TV-Screen) und klickt eine Runde von der Lobby bis zur Auflösung durch – inklusive
+  Weitergabe-Screens, Zahnrad-Menü, Reconnect und ein Gerät, das alle vier Spieler abdeckt.
+- **`test:unit`** prüft die Stellen, an denen Eingaben in gefährliche Positionen wandern —
+  vor allem den Wiki-Namen, der im Hostnamen landet.
 
 ---
 

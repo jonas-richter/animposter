@@ -85,7 +85,11 @@ export function buildView(room: Room, device: Device): RoomView {
   const spectating = isSpectatorDevice(room, device.id);
   const showEverything = room.phase === 'results' || (spectating && round !== null);
 
-  const deviceOnline = new Map(room.devices.map((d) => [d.id, now - d.lastSeen < ONLINE_WINDOW_MS]));
+  const deviceOnline = new Map(
+    room.devices
+      .filter((d) => !d.hidden)
+      .map((d) => [d.id, now - d.lastSeen < ONLINE_WINDOW_MS]),
+  );
 
   const seats: SeatPublic[] = room.seats
     .slice()

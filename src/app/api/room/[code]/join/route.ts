@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { addDevice, addSeat, cleanName, deviceByToken, roundInProgress } from '@/lib/game';
 import { withRoom } from '@/lib/store';
-import { handleError, noStore, normalizeCode, readJson, TOKEN_HEADER } from '@/lib/http';
+import { handleError, jsonError, noStore, normalizeCode, readJson, TOKEN_HEADER } from '@/lib/http';
 import { buildView } from '@/lib/view';
+import { hitLimit, LIMITS, requestCountry, shortUserAgent } from '@/lib/limits';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -16,6 +17,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
     const code = normalizeCode(rawCode);
     const body = await readJson(req);
     const existingToken = req.headers.get(TOKEN_HEADER);
+    if (!existingToken && hitLimit(req, LIMITS.join)) {
+      return jsonError('Zu viele Beitritte in kurzer Zeit.', 429);
+    }
+    const meta = { country: requestCountry(req), userAgent: shortUserAgent(req) };
 
     const { room, result } = await withRoom(code, (room) => {
       // Reconnect path: token already belongs to this room.
@@ -32,7 +37,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
       // Latecomers are always let in; they simply sit the running round out.
       const waiting = roundInProgress(room);
 
-      const device = addDevice(room);
+      const device = addDevice(room, meta);
       if (typeof body.name === 'string' && body.name.trim()) {
         try {
           addSeat(room, device.id, cleanName(body.name), waiting);

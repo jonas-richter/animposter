@@ -38,6 +38,31 @@ async function api(path, { method = 'GET', token, body } = {}) {
   return { status: res.status, data, text };
 }
 
+let adminCookie = '';
+async function adminApi(path, { method = 'GET', body } = {}) {
+  const res = await fetch(BASE + path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(adminCookie ? { Cookie: adminCookie } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const setCookie = res.headers.get('set-cookie');
+  if (setCookie) {
+    const m = setCookie.match(/impostor_admin=([^;]*)/);
+    if (m) adminCookie = `impostor_admin=${m[1]}`;
+  }
+  const text = await res.text();
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    /* non-json */
+  }
+  return { status: res.status, data, text };
+}
+
 const act = (code, token, payload) =>
   api(`/api/room/${code}/action`, { method: 'POST', token, body: payload });
 
@@ -574,6 +599,158 @@ async function main() {
     'Punkte zurückgesetzt',
     restart.data.view.seats.every((s) => s.score === 0),
   );
+
+  // ---- wiki assistant proxy ------------------------------------------------
+  console.log('10e) Wiki-Assistent (Eingabeprüfung)');
+  const badSlug = await api('/api/wiki?action=search&wiki=evil.example.com&q=zoro');
+  check('Punkt im Wiki-Namen abgelehnt', badSlug.status === 400, badSlug.text.slice(0, 120));
+  const slashSlug = await api('/api/wiki?action=search&wiki=one%2Fpiece&q=zoro');
+  check('Schrägstrich abgelehnt', slashSlug.status === 400, slashSlug.text.slice(0, 120));
+  const shortQ = await api('/api/wiki?action=search&wiki=onepiece&q=a');
+  check('Zu kurze Suche abgelehnt', shortQ.status === 400, shortQ.text.slice(0, 120));
+  const noPair = await api('/api/wiki?action=detail&wiki=onepiece&a=Zoro');
+  check('Detailabfrage braucht zwei Namen', noPair.status === 400, noPair.text.slice(0, 120));
+  const badAction = await api('/api/wiki?action=drop&wiki=onepiece');
+  check('Unbekannte Aktion abgelehnt', badAction.status === 400, badAction.text.slice(0, 120));
+  const unreachable = await api('/api/wiki?action=search&wiki=diesgibtesnichtxyz123&q=test');
+  check(
+    'Unerreichbares Wiki endet mit klarer Meldung, nicht mit 500',
+    unreachable.status === 400,
+    `${unreachable.status} ${unreachable.text.slice(0, 120)}`,
+  );
+
+  // ---- admin, privacy, limits ---------------------------------------------
+  console.log('10f) Admin-Backend');
+  const st = await adminApi('/api/admin?action=status');
+  check('Status ohne Anmeldung abrufbar', st.status === 200);
+  check('Admin ist konfiguriert (Testumgebung)', st.data.configured === true, JSON.stringify(st.data));
+  check('Noch nicht angemeldet', st.data.authed === false);
+
+  const denied = await adminApi('/api/admin?action=overview');
+  check('Übersicht ohne Anmeldung gesperrt', denied.status === 401);
+
+  const wrong = await adminApi('/api/admin', { method: 'POST', body: { action: 'login', password: 'falsch' } });
+  check('Falsches Passwort abgelehnt', wrong.status === 401, wrong.text.slice(0, 100));
+  check('Kein Cookie bei falschem Passwort', adminCookie === '');
+
+  const ok = await adminApi('/api/admin', {
+    method: 'POST',
+    body: { action: 'login', password: 'test-admin-passwort' },
+  });
+  check('Richtiges Passwort akzeptiert', ok.status === 200, ok.text.slice(0, 100));
+  check('Session-Cookie gesetzt', adminCookie.length > 20);
+
+  const overview = await adminApi('/api/admin?action=overview');
+  check('Übersicht nach Anmeldung', overview.status === 200);
+  check('Räume werden gelistet', Array.isArray(overview.data.rooms) && overview.data.rooms.length > 0,
+    String(overview.data.rooms?.length));
+  const anyRoom = overview.data.rooms[0];
+  check('Gerätezeile hat Land und Browser', 'country' in (anyRoom.devices[0] ?? {}));
+  check(
+    'Keine IP-Adresse in der Übersicht',
+    !/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(JSON.stringify(overview.data)),
+  );
+  check('Verlauf vorhanden', Array.isArray(overview.data.history) && overview.data.history.length > 0,
+    String(overview.data.history?.length));
+  check('Aufbewahrung wird gemeldet', overview.data.retentionDays === 7);
+
+  // invisible spectator
+  const watchRoom = await api('/api/room', { method: 'POST' });
+  const wCode = watchRoom.data.code;
+  const wGm = watchRoom.data.token;
+  await api(`/api/room/${wCode}/join`, { method: 'POST', token: wGm, body: { name: 'Sichtbar' } });
+  const before = (await api(`/api/room/${wCode}/state`, { token: wGm })).data.view;
+  const watch = await adminApi('/api/admin', { method: 'POST', body: { action: 'watch', code: wCode } });
+  check('Unsichtbarer Beobachter bekommt ein Token', watch.status === 200 && !!watch.data.token);
+  const after = (await api(`/api/room/${wCode}/state`, { token: wGm })).data.view;
+  check('Beobachter taucht nicht in der Spielerliste auf', after.seats.length === before.seats.length);
+  const watcherView = (await api(`/api/room/${wCode}/state`, { token: watch.data.token })).data.view;
+  check('Beobachter sieht als Zuschauer alles', watcherView.spectating === true);
+
+  const notAdmin = await fetch(`${BASE}/api/admin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'watch', code: wCode }),
+  });
+  check('Ohne Cookie kein unsichtbares Zuschauen', notAdmin.status === 401);
+
+  // promote a room topic to the permanent library
+  const topicJson = JSON.stringify({
+    name: 'Dauerhaft Test',
+    pairs: [1, 2, 3].map((i) => ({
+      real: { name: `P${i}` },
+      impostor: { name: `Q${i}` },
+      similarities: ['a', 'b', 'c'],
+      traps: ['t'],
+    })),
+  });
+  await act(wCode, wGm, { type: 'addCustomTopic', json: topicJson });
+  const ov2 = await adminApi('/api/admin?action=overview');
+  const room2 = ov2.data.rooms.find((r) => r.code === wCode);
+  const custom = room2.customTopics[0];
+  const promoted = await adminApi('/api/admin', {
+    method: 'POST',
+    body: { action: 'promote', code: wCode, topicId: custom.id },
+  });
+  check('Thema dauerhaft gemacht', promoted.status === 200, promoted.text.slice(0, 120));
+
+  const freshRoom = await api('/api/room', { method: 'POST' });
+  await api(`/api/room/${freshRoom.data.code}/join`, {
+    method: 'POST',
+    token: freshRoom.data.token,
+    body: { name: 'Neu' },
+  });
+  const freshView = (await api(`/api/room/${freshRoom.data.code}/state`, { token: freshRoom.data.token })).data.view;
+  check(
+    'Dauerhaftes Thema ist in einem neuen Raum da',
+    freshView.topics.some((t) => t.name === 'Dauerhaft Test'),
+    freshView.topics.map((t) => t.name).join(','),
+  );
+
+  const cfg2 = await adminApi('/api/admin', { method: 'POST', body: { action: 'config', llmForEveryone: true } });
+  check('Konfiguration speicherbar', cfg2.data.config.llmForEveryone === true);
+  await adminApi('/api/admin', { method: 'POST', body: { action: 'config', llmForEveryone: false } });
+
+  const out = await adminApi('/api/admin', { method: 'POST', body: { action: 'logout' } });
+  check('Abmelden funktioniert', out.status === 200);
+
+  console.log('10g) Rate-Limit greift nur hinter einem echten Proxy');
+  const limited = [];
+  for (let i = 0; i < 34; i++) {
+    const r = await fetch(`${BASE}/api/room`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '203.0.113.7' },
+      body: '{}',
+    });
+    limited.push(r.status);
+  }
+  check(
+    'Massenhaftes Anlegen wird gebremst',
+    limited.includes(429),
+    limited.slice(-3).join(','),
+  );
+  const stillFine = await api('/api/room', { method: 'POST' });
+  check('Normale Nutzung bleibt unberührt', stillFine.status === 200, String(stillFine.status));
+
+  console.log('10h) Bild-Proxy und Datenschutz');
+  const goodImg = await fetch(
+    `${BASE}/api/img?u=${encodeURIComponent('https://static.wikia.nocookie.net/onepiece/images/5/52/x.png')}`,
+  );
+  check('Erlaubter Host wird angenommen', goodImg.status !== 400, String(goodImg.status));
+  const badImg = await fetch(`${BASE}/api/img?u=${encodeURIComponent('https://evil.example.com/x.png')}`);
+  check('Fremder Host abgelehnt', badImg.status === 400);
+  const notImg = await fetch(
+    `${BASE}/api/img?u=${encodeURIComponent('https://static.wikia.nocookie.net/a/b/c.txt')}`,
+  );
+  check('Nicht-Bildpfad abgelehnt', notImg.status === 400);
+  const privacy = await fetch(`${BASE}/datenschutz`);
+  check('Datenschutzseite erreichbar', privacy.status === 200);
+
+  console.log('10i) LLM-Endpunkt gesperrt ohne Freigabe');
+  const llmStatus = await api('/api/llm');
+  check('LLM meldet sich als nicht verfügbar', llmStatus.data.available === false, JSON.stringify(llmStatus.data));
+  const llmPost = await api('/api/llm', { method: 'POST', body: { theme: 'Star Wars' } });
+  check('LLM-Aufruf ohne Key abgewiesen', llmPost.status === 400, llmPost.text.slice(0, 120));
 
   // ---- health -------------------------------------------------------------
   const health = await api('/api/health');

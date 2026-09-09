@@ -66,9 +66,21 @@ export function GeneratedArt({ name }: { name: string }) {
   );
 }
 
+/**
+ * Fandom images go through our own proxy so a player's browser never talks to
+ * a third party. Anything else is left alone.
+ */
+export function proxied(src: string): string {
+  return src.startsWith('https://static.wikia.nocookie.net/')
+    ? `/api/img?u=${encodeURIComponent(src)}`
+    : src;
+}
+
 export default function CharacterArt({ name, src }: { name: string; src?: string }) {
   const [failed, setFailed] = useState(false);
   if (!src || failed) return <GeneratedArt name={name} />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} alt={name} onError={() => setFailed(true)} loading="lazy" />;
+  return (
+    <img src={proxied(src)} alt={name} onError={() => setFailed(true)} loading="lazy" />
+  );
 }

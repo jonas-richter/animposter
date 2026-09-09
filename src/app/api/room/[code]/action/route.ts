@@ -22,6 +22,8 @@ import {
 } from '@/lib/game';
 import { deleteRoom, getRoom, withRoom } from '@/lib/store';
 import { afterMutation } from '@/lib/tick';
+import { recordRound, unregisterRoom } from '@/lib/registry';
+import { hitLimit, LIMITS as RATE } from '@/lib/limits';
 import { handleError, noStore, normalizeCode, readJson, TOKEN_HEADER } from '@/lib/http';
 import { buildView } from '@/lib/view';
 import { LIMITS, parseCustomTopic } from '@/lib/validateTopic';
@@ -58,6 +60,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
 
     let leftRoom = false;
     let roomEmpty = false;
+    let finished: Parameters<typeof recordRound>[0] | null = null;
 
     const { room, result } = await withRoom(code, (room) => {
       const device = deviceByToken(room, token);
@@ -203,6 +206,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
         case 'finishRound': {
           requireGm(room, device);
           finishRound(room);
+          finished = historyEntry(room);
           return {};
         }
         case 'nextRound': {
@@ -294,6 +298,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
 
         // ---- custom topics -------------------------------------------------
         case 'addCustomTopic': {
+          if (hitLimit(req, RATE.customTopic)) {
+            throw new GameError('Zu viele eigene Themen in kurzer Zeit.');
+          }
           if (room.customTopics.length >= LIMITS.maxCustomTopicsPerRoom) {
             throw new GameError(
               `Maximal ${LIMITS.maxCustomTopicsPerRoom} eigene Themen pro Raum.`,
@@ -347,15 +354,23 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
     // Auto-advance: once every active seat has voted, resolve immediately.
     if (type === 'castVote') {
       await withRoom(code, (r) => {
-        if (r.phase === 'voting' && everyoneVoted(r)) finishRound(r);
+        if (r.phase === 'voting' && everyoneVoted(r)) {
+          finishRound(r);
+          finished = historyEntry(r);
+          afterMutation(r);
+        }
         return {};
       });
     }
+    if (finished) await recordRound(finished);
 
     if (leftRoom) {
       // Nobody is left in here - free it immediately instead of letting it
       // idle away its remaining TTL.
-      if (roomEmpty) await deleteRoom(code);
+      if (roomEmpty) {
+        await deleteRoom(code);
+        await unregisterRoom(code);
+      }
       return noStore(NextResponse.json({ ok: true, left: true }));
     }
 
@@ -370,4 +385,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
   } catch (e) {
     return handleError(e);
   }
+}
+
+/** Compact, retention-limited record of a finished round for the admin view. */
+function historyEntry(room: Room) {
+  const r = room.round;
+  const nameOf = (id: string) => room.seats.find((s) => s.id === id)?.name ?? '?';
+  return {
+    at: Date.now(),
+    code: room.code,
+    round: r?.n ?? 0,
+    topic: r?.topicName ?? '',
+    players: (r?.activeSeatIds ?? []).map(nameOf),
+    impostors: (r?.impostorSeatIds ?? []).map(nameOf),
+    realName: r?.pair.realName ?? '',
+    impostorName: r?.pair.impostorName ?? '',
+  };
 }

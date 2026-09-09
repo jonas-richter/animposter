@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createRoom, fetchHealth, saveToken } from '@/lib/client';
 import CodeScanner, { scannerSupported } from '@/components/CodeScanner';
+import { proxied } from '@/components/CharacterArt';
 
 // A few real characters for the hero stack. Hardcoded rather than imported from
 // the library so the landing page does not pull the whole 80-pair file into the
@@ -74,7 +75,7 @@ export default function HomePage() {
           {HERO.map((c, i) => (
             <span key={c.name} className={`hero-card c${i}`}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={c.src} alt="" loading="eager" />
+              <img src={proxied(c.src)} alt="" loading="eager" />
             </span>
           ))}
           <span className="hero-card back">
@@ -176,6 +177,10 @@ export default function HomePage() {
         4–24 Spieler · ~5 Minuten pro Runde · 80 Charakterpaare
         <br />
         Ein Handy pro Person — oder eins für mehrere, das geht auch.
+        <br />
+        <a href="/datenschutz" className="footlink">
+          Datenschutz
+        </a>
       </p>
 
       {scanOpen && (

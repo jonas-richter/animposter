@@ -100,15 +100,25 @@ export function seatsOf(room: Room, deviceId: string): Seat[] {
 }
 
 export function allTopics(room: Room): Topic[] {
-  return [...BUILTIN_TOPICS, ...room.customTopics];
+  // Topics the admin promoted are attached to the room when it is loaded, so
+  // this stays a pure function.
+  return [...BUILTIN_TOPICS, ...(room.globalTopics ?? []), ...room.customTopics];
 }
 
 export function topicById(room: Room, id: string): Topic | undefined {
   return allTopics(room).find((t) => t.id === id);
 }
 
-export function addDevice(room: Room): Device {
-  const device: Device = { id: randomUUID(), token: makeToken(), lastSeen: Date.now() };
+export function addDevice(
+  room: Room,
+  meta: { country?: string; userAgent?: string; hidden?: boolean } = {},
+): Device {
+  const device: Device = {
+    id: randomUUID(),
+    token: makeToken(),
+    lastSeen: Date.now(),
+    ...meta,
+  };
   room.devices.push(device);
   return device;
 }

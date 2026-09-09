@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis';
+import { globalTopicsCached } from './registry';
 import type { Room } from './types';
 
 // Storage layer.
@@ -89,7 +90,10 @@ const lockKey = (code: string) => `impostor:lock:${code}`;
 export async function getRoomCached(code: string): Promise<Room | null> {
   if (!redis) return getRoom(code);
   const hit = memory().cache.get(code);
-  if (hit && Date.now() - hit.at < READ_CACHE_MS) return hit.room;
+  if (hit && Date.now() - hit.at < READ_CACHE_MS) {
+    hit.room.globalTopics = await globalTopicsCached();
+    return hit.room;
+  }
   const room = await getRoom(code);
   if (room) memory().cache.set(code, { room, at: Date.now() });
   else memory().cache.delete(code);
@@ -97,6 +101,12 @@ export async function getRoomCached(code: string): Promise<Room | null> {
 }
 
 export async function getRoom(code: string): Promise<Room | null> {
+  const room = await loadRoom(code);
+  if (room) room.globalTopics = await globalTopicsCached();
+  return room;
+}
+
+async function loadRoom(code: string): Promise<Room | null> {
   if (redis) {
     const raw = await redis.get<Room>(key(code));
     return raw ?? null;
@@ -114,7 +124,11 @@ export async function getRoom(code: string): Promise<Room | null> {
 export async function putRoom(room: Room): Promise<void> {
   room.updatedAt = Date.now();
   if (redis) {
-    await redis.set(key(room.code), room, { ex: ROOM_TTL_SECONDS });
+    // Promoted topics are attached on load; storing them per room would
+    // duplicate them into every room and never update.
+    const { globalTopics, ...persisted } = room;
+    void globalTopics;
+    await redis.set(key(room.code), persisted, { ex: ROOM_TTL_SECONDS });
     memory().cache.set(room.code, { room, at: Date.now() });
     return;
   }

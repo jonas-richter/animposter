@@ -21,6 +21,15 @@ export interface Device {
   /** Secret. Only ever sent to the owning client, never inside a room view. */
   token: string;
   lastSeen: number;
+  /**
+   * Two-letter country from the edge header. We deliberately never store the
+   * IP address itself - this is enough to moderate a public deployment and is
+   * far less personal data. See lib/limits.ts.
+   */
+  country?: string;
+  userAgent?: string;
+  /** An admin watching without appearing in the room. */
+  hidden?: boolean;
 }
 
 export interface Seat {
@@ -144,6 +153,8 @@ export interface Room {
   roundCounter: number;
   /** Room-bound custom topics added via the JSON import. */
   customTopics: Topic[];
+  /** Topics the admin made permanent; filled in when the room is loaded. */
+  globalTopics?: Topic[];
   /** Pair ids already used in this room, to avoid repeats. */
   usedPairIds: string[];
   /**
