@@ -1,0 +1,11 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Netlify installs @netlify/plugin-nextjs automatically when it detects Next.js.
+# Listing it explicitly does no harm and makes the intent obvious.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

@@ -1,0 +1,32 @@
+{
+  "name": "impostor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Impostor - Party-Spiel fuer Smartphones (Anime/Serien/Universen)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "check:images": "node scripts/check-images.mjs",
+    "test:api": "node scripts/e2e-api-test.mjs",
+    "test:ui": "node scripts/run-ui-test.mjs",
+    "test": "npm run test:api && npm run test:ui"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.34.3",
+    "next": "15.5.25",
+    "qrcode": "^1.5.4",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "esbuild": "^0.24.2",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2"
+  }
+}
