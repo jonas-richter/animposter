@@ -16,7 +16,7 @@ import {
   topicVoteWinner,
   transferGm,
 } from '@/lib/game';
-import { getRoom, withRoom } from '@/lib/store';
+import { deleteRoom, getRoom, withRoom } from '@/lib/store';
 import { handleError, noStore, normalizeCode, readJson, TOKEN_HEADER } from '@/lib/http';
 import { buildView } from '@/lib/view';
 import { LIMITS, parseCustomTopic } from '@/lib/validateTopic';
@@ -52,6 +52,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
     const type = str(body.type, 'type');
 
     let leftRoom = false;
+    let roomEmpty = false;
 
     const { room, result } = await withRoom(code, (room) => {
       const device = deviceByToken(room, token);
@@ -232,6 +233,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
             typeof body.successorDeviceId === 'string' ? body.successorDeviceId : undefined,
           );
           leftRoom = true;
+          roomEmpty = room.devices.length === 0;
           return {};
         }
 
@@ -276,6 +278,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
     }
 
     if (leftRoom) {
+      // Nobody is left in here - free it immediately instead of letting it
+      // idle away its remaining TTL.
+      if (roomEmpty) await deleteRoom(code);
       return noStore(NextResponse.json({ ok: true, left: true }));
     }
 

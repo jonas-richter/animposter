@@ -906,3 +906,226 @@ details summary {
   padding: 8px 0;
   font-size: 15px;
 }
+
+/* ==========================================================================
+   Motion & interaction polish
+   ========================================================================== */
+
+/* Staggered entrance for the main column. Cheap, and it makes every phase
+   change feel intentional instead of "the DOM swapped". */
+.shell > * {
+  animation: enter 0.42s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.shell > *:nth-child(1) { animation-delay: 0.02s; }
+.shell > *:nth-child(2) { animation-delay: 0.06s; }
+.shell > *:nth-child(3) { animation-delay: 0.1s; }
+.shell > *:nth-child(4) { animation-delay: 0.14s; }
+.shell > *:nth-child(5) { animation-delay: 0.18s; }
+.shell > *:nth-child(6) { animation-delay: 0.22s; }
+.shell > *:nth-child(n + 7) { animation-delay: 0.26s; }
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+}
+
+.pop {
+  animation: pop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1) backwards;
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+}
+
+/* Card: the drag needs to follow the finger, so kill the transition while
+   dragging and put it back for the snap. */
+.rolecard.dragging .inner {
+  transition: none;
+}
+.rolecard:not(.dragging) .inner {
+  transition: transform 0.5s cubic-bezier(0.3, 1.35, 0.5, 1);
+}
+.rolecard .back .hint {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  margin-top: 8px;
+}
+.swipe-hint {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--ink-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.swipe-hint .finger {
+  font-size: 20px;
+  animation: swipe 1.9s ease-in-out infinite;
+}
+@keyframes swipe {
+  0%, 100% { transform: translateX(-8px) rotate(-8deg); }
+  50%      { transform: translateX(10px) rotate(8deg); }
+}
+/* slow shimmer across the face-down card */
+.rolecard .back::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.1) 50%, transparent 60%);
+  transform: translateX(-120%);
+  animation: sheen 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes sheen {
+  0%   { transform: translateX(-120%); }
+  55%  { transform: translateX(120%); }
+  100% { transform: translateX(120%); }
+}
+
+/* ---------- voting orbs ---------- */
+
+.orbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  touch-action: none;
+}
+.orb {
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 64px;
+  touch-action: none;
+}
+.orb:active:not(:disabled) {
+  transform: none;
+}
+.orb-face {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: 900;
+  color: #0b0b14;
+  background: linear-gradient(150deg, #fff, #b9b3d8);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4), inset 0 -5px 10px rgba(0, 0, 0, 0.18);
+  transition: transform 0.16s cubic-bezier(0.3, 1.5, 0.5, 1), box-shadow 0.16s ease;
+}
+.orb-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-dim);
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orb.active .orb-face {
+  background: linear-gradient(150deg, var(--violet), var(--pink));
+  color: #fff;
+  transform: translateY(-4px) scale(1.08);
+  box-shadow: 0 8px 0 var(--violet-deep), 0 12px 26px rgba(123, 92, 255, 0.45);
+}
+.orb.done .orb-face {
+  opacity: 0.42;
+}
+.orb.done .orb-name {
+  text-decoration: line-through;
+}
+.orb.dragging .orb-face {
+  opacity: 0.25;
+}
+.orb.ghost {
+  position: fixed;
+  z-index: 80;
+  width: auto;
+  margin: -25px 0 0 -25px;
+  pointer-events: none;
+  animation: none;
+}
+.orb.ghost .orb-face {
+  transform: scale(1.15);
+  background: linear-gradient(150deg, var(--violet), var(--pink));
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+}
+
+.select-target.hover-drop {
+  border-color: var(--pink);
+  background: rgba(255, 92, 168, 0.2);
+  transform: scale(1.02);
+}
+.mini-orbs {
+  display: flex;
+  gap: -4px;
+  flex: none;
+}
+.mini-orb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 900;
+  color: #0b0b14;
+  border: 2px solid #131120;
+  margin-left: -7px;
+}
+.mini-orb:first-child {
+  margin-left: 0;
+}
+
+/* ---------- misc motion ---------- */
+
+.dots i {
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+.dots i.on {
+  transform: scale(1.25);
+}
+
+.chip-player {
+  transition: transform 0.14s cubic-bezier(0.3, 1.4, 0.5, 1), opacity 0.2s ease,
+    border-color 0.2s ease, background 0.2s ease;
+}
+.chip-player:active {
+  transform: scale(0.95);
+}
+
+.face-card .pic img,
+.face-card .pic svg,
+.thumb img,
+.thumb svg {
+  animation: fadein 0.5s ease backwards;
+}
+@keyframes fadein {
+  from { opacity: 0; }
+}
+
+.handoff {
+  animation: enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.progress > i {
+  position: relative;
+  overflow: hidden;
+}

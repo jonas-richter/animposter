@@ -100,6 +100,14 @@ export async function putRoom(room: Room): Promise<void> {
   });
 }
 
+export async function deleteRoom(code: string): Promise<void> {
+  if (redis) {
+    await redis.del(key(code));
+    return;
+  }
+  memory().rooms.delete(code);
+}
+
 export async function roomExists(code: string): Promise<boolean> {
   return (await getRoom(code)) !== null;
 }

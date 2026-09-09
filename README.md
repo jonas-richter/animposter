@@ -220,6 +220,20 @@ Im **⋯-Menü**: „Gamemaster übergeben" wählt gezielt ein anderes Gerät. B
 kann der Gamemaster einen Nachfolger auswählen – tut er das nicht, wird automatisch zufällig ein
 verbleibendes Gerät zum Gamemaster.
 
+### Wann verschwindet ein Raum wieder?
+
+Drei Fälle:
+
+- **Alle verlassen den Raum aktiv** (⋯-Menü → Verlassen): Sobald das letzte Gerät draußen ist,
+  wird der Raum sofort gelöscht.
+- **Alle schließen einfach den Tab:** Dann bleibt der Raum liegen und verfällt automatisch
+  **8 Stunden nach der letzten Aktion**. Jede Aktion setzt die Uhr zurück, ein laufender
+  Spieleabend läuft also nie ab.
+- **Server ohne Redis:** Da verschwinden Räume unvorhersehbar früher — siehe Abschnitt 2.
+
+Es sammelt sich also nichts an. Bei Upstash landen die Räume unter einem TTL, den Redis selbst
+aufräumt; im In-Memory-Modus sind sie ohnehin weg, sobald der Prozess neu startet.
+
 ### Bildschirm gesperrt? Seite neu geladen?
 
 Kein Problem. Die Session liegt im Browser des Geräts. Beim Zurückkommen landest du in derselben
@@ -287,35 +301,33 @@ Fehlerhafte Themen landen nie in der Bibliothek. Maximal 20 eigene Themen pro Ra
 
 ## 6. Bilder
 
-Die mitgelieferten 80 Charakter-Paare kommen **ohne** Bild-URLs, und das ist Absicht:
+Jeder der 160 Charaktere hat ein echtes Bild. Die URLs stammen aus dem jeweiligen
+Fandom-Wiki (dessen eigenes Infobox-Bild über die MediaWiki-API `prop=pageimages`) und wurden
+anschließend im Browser einzeln daraufhin geprüft, dass sie wirklich laden — 159 Dateien, keine
+kaputte dabei (zwei Paare teilen sich einen Charakter).
 
-- Für Anime- und Serienfiguren gibt es auf Wikimedia Commons praktisch keine frei lizenzierten
-  Bilder – die Figuren sind urheberrechtlich geschützt.
-- Fandom/Wikia-URLs lassen sich nicht dauerhaft verlässlich einbinden (Hotlink-Schutz, wechselnde
-  Pfade) und wären zudem rechtlich heikel.
+Sie liegen in `src/lib/images.ts`, getrennt von den Charakterdaten, und werden beim Laden der
+Bibliothek automatisch angehängt. Gespeichert ist nur der Pfad; die Breite (400 px) hängt die App
+zur Laufzeit an, damit auf dem Handy keine mehrere Megabyte großen Originale geladen werden.
 
-Stattdessen erzeugt die App für jeden Charakter eine **eigene Karte**: ein aus dem Namen
-abgeleiteter Farbverlauf mit Monogramm. Sieht bewusst gestaltet aus, lädt sofort, funktioniert
-offline und kann nie kaputtgehen.
-
-Wenn du trotzdem Bilder willst, trage sie im Feld `image` ein –
-in `src/lib/characters.ts` oder in deinem eigenen Themen-JSON:
-
-```ts
-real: { name: 'Roronoa Zoro', image: 'https://upload.wikimedia.org/…/datei.jpg' },
-```
-
-Dann prüfen:
+Nachprüfen:
 
 ```bash
 npm run check:images
 ```
 
-Das Skript testet jede URL auf HTTP-Status und Content-Type und meldet kaputte Links. Lädt ein
-Bild im Browser trotzdem nicht, fällt die App automatisch auf die generierte Karte zurück –
-ein kaputtes Bild-Symbol siehst du also nie.
+Das Skript testet jede URL auf HTTP-Status und Content-Type.
 
----
+**Ein Bild austauschen:** In `src/lib/images.ts` den Pfad hinter dem Charakternamen ersetzen. Den
+Pfad findest du, indem du auf der Fandom-Seite das gewünschte Bild in einem neuen Tab öffnest und
+alles nach `https://static.wikia.nocookie.net/` bis einschließlich der Dateiendung kopierst.
+
+**Wenn ein Link doch mal stirbt,** zeigt die App automatisch eine generierte Karte mit Farbverlauf
+und Monogramm statt eines kaputten Bild-Symbols. Es sieht also nie defekt aus.
+
+Die Bilder sind urheberrechtlich geschützt und werden von Fandom aus eingebunden, nicht kopiert.
+Für einen privaten Spieleabend ist das unproblematisch; für etwas Öffentliches solltest du eigene
+oder lizenzfreie Bilder eintragen.
 
 ## 7. Tests
 
@@ -399,5 +411,6 @@ scripts/                         Tests und Bild-Prüfung
   Build-Abhängigkeiten von Next.js, die zur Laufzeit nicht im Spiel sind (die App nutzt kein
   `next/image`). Ein `npm audit fix --force` würde Next.js zerlegen – besser einfach die
   Next-Version aktuell halten.
-- Beim Themen-Voting gibt ein Gerät die Stimme für alle seine Spieler gleichzeitig ab. Das ist
-  bewusst so: Themenwahl ist nichts Geheimes, und alle an diesem Gerät sitzen ohnehin nebeneinander.
+- Beim Themen-Voting bekommt ein Gerät mit mehreren Spielern für jeden einen Orb mit den
+  Initialen. Den ziehst du auf ein Thema oder tippst ihn an und dann das Thema — so zählt jede
+  Stimme einzeln. Bei einem Spieler pro Gerät gibt es keine Orbs, da tippt man einfach das Thema an.

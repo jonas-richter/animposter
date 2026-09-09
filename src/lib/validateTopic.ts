@@ -89,8 +89,10 @@ export function validateImageUrl(value: unknown, where: string): string | undefi
       `${where}: Host "${url.hostname}" ist nicht erlaubt. Erlaubt sind: ${ALLOWED_IMAGE_HOSTS.join(', ')}.`,
     );
   }
-  if (!/\.(png|jpe?g|gif|webp|svg)$/i.test(url.pathname)) {
-    fail(`${where}: die URL muss direkt auf eine Bilddatei zeigen (.png, .jpg, .webp, .gif, .svg).`);
+  // Fandom serves scaled copies as .../Datei.png/revision/latest/scale-to-width-down/400,
+  // so the extension may sit in the middle of the path rather than at the end.
+  if (!/\.(png|jpe?g|gif|webp|svg)(\/|$)/i.test(url.pathname)) {
+    fail(`${where}: die URL muss auf eine Bilddatei zeigen (.png, .jpg, .webp, .gif, .svg).`);
   }
   return url.toString();
 }

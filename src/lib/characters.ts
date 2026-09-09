@@ -1,4 +1,5 @@
 import type { Topic } from './types';
+import { imageFor } from './images';
 
 // Curated character pairs.
 //
@@ -6,11 +7,10 @@ import type { Topic } from './types';
 // (look, role, temperament, story function) but differs in 1-2 concrete details
 // that a sharp player can catch ("traps").
 //
-// IMAGES: the optional `image` field takes an absolute https URL from an
-// allow-listed host (see lib/validateTopic.ts). It is intentionally left empty
-// in the bundled library - see README ("Bilder") for the reasoning. Without an
-// image the app renders a generated character card, so nothing ever looks broken.
-// Run `npm run check:images` to validate any URLs you add.
+// IMAGES: artwork is attached at the bottom of this file from lib/images.ts.
+// Setting `image` on a pair explicitly still wins. Without any image the app
+// renders a generated card, so nothing ever looks broken.
+// Run `npm run check:images` to re-verify every URL.
 
 export const BUILTIN_TOPICS: Topic[] = [
   {
@@ -1283,5 +1283,14 @@ export const BUILTIN_TOPICS: Topic[] = [
     ],
   },
 ];
+
+// Attach the verified artwork. Kept out of the big literal above so the pair
+// data stays readable and the image list can be regenerated on its own.
+for (const topic of BUILTIN_TOPICS) {
+  for (const pair of topic.pairs) {
+    pair.real.image ??= imageFor(pair.real.name);
+    pair.impostor.image ??= imageFor(pair.impostor.name);
+  }
+}
 
 export const BUILTIN_TOPIC_IDS = new Set(BUILTIN_TOPICS.map((t) => t.id));

@@ -218,8 +218,18 @@ async function main() {
   check('Mira sieht Themenliste', mira.text().includes('Welches Universum'), mira.text().slice(0, 200));
   check('One Piece steht zur Wahl', mira.text().includes('One Piece'));
 
-  await mira.click('Naruto');
-  await tom.click('Naruto');
+  check('Mira stimmt ab', await mira.clickCandidate('Naruto'));
+  check('Ein Spieler pro Gerät: keine Orbs', !mira.container.querySelector('.orbs'));
+  // Tom's phone holds two seats -> one orb each, so each vote is cast separately.
+  check('Zwei Spieler pro Gerät: Orbs da', !!tom.container.querySelector('.orbs'), tom.text().slice(0, 200));
+  check('Zwei Orbs', tom.container.querySelectorAll('.orb').length === 2);
+  const orbState = () =>
+    [...tom.container.querySelectorAll('.orb')].map((o) => o.className).join(' | ');
+  // clickCandidate targets the topic row itself; plain text matching would also
+  // hit an orb, whose aria-label mentions the topic it voted for.
+  check('Tom stimmt ab', await tom.clickCandidate('Naruto'));
+  check('Zwei Orbs vor der zweiten Stimme', orbState().includes('done'));
+  check('Lena stimmt ab', await tom.clickCandidate('Naruto'));
   await gm.settle();
   // Mira = 1 seat, Tom's phone = 2 seats -> 3 votes in total.
   const narutoRow = [...gm.container.querySelectorAll('.select-target')].find(
@@ -236,7 +246,7 @@ async function main() {
   await mira.settle();
   await tom.settle();
 
-  check('GM sieht verdeckte Karte', gm.text().includes('Antippen zum Aufdecken'), gm.text().slice(0, 200));
+  check('GM sieht verdeckte Karte', !gm.container.querySelector('.rolecard.shown'), gm.text().slice(0, 200));
   check(
     'Gerät mit 2 Spielern zeigt Übergabe-Screen',
     tom.text().includes('Handy weitergeben an'),
@@ -250,7 +260,7 @@ async function main() {
 
   // GM + Mira: simple tap to reveal
   for (const phone of [gm, mira]) {
-    await phone.click('Antippen zum Aufdecken');
+    await phone.click('Aufdecken');
     check(`${phone.name}: Charakter sichtbar`, phone.text().includes('Dein Charakter'), phone.text().slice(0, 200));
     check(
       `${phone.name}: Impostor-Status angezeigt`,
@@ -262,8 +272,8 @@ async function main() {
   // Tom's phone: handoff -> card -> pass on -> handoff -> card -> finished
   const firstName = tom.text().includes('Tom') ? 'Tom' : 'Lena';
   await tom.click(/Ich bin .* – Karte zeigen/);
-  check('Tom+Lena: erste Karte verdeckt', tom.text().includes('Antippen zum Aufdecken'));
-  await tom.click('Antippen zum Aufdecken');
+  check('Tom+Lena: erste Karte verdeckt', tom.text().includes('Aufdecken'));
+  await tom.click('Aufdecken');
   const firstChar = tom.container.querySelector('.rolecard .name')?.textContent ?? '';
   check('Tom+Lena: erster Charakter sichtbar', firstChar.length > 0, firstChar);
   await tom.click('Gesehen – weitergeben');
@@ -274,8 +284,8 @@ async function main() {
   );
   check('Tom+Lena: Karte ist wieder weg', !tom.container.querySelector('.rolecard.shown'));
   await tom.click(/Ich bin .* – Karte zeigen/);
-  check('Tom+Lena: zweite Karte startet verdeckt', tom.text().includes('Antippen zum Aufdecken'));
-  await tom.click('Antippen zum Aufdecken');
+  check('Tom+Lena: zweite Karte startet verdeckt', tom.text().includes('Aufdecken'));
+  await tom.click('Aufdecken');
   await tom.click('Gesehen – alle fertig');
   check('Tom+Lena: Sequenz beendet', tom.text().includes('Alle haben geschaut'), tom.text().slice(0, 200));
 
@@ -361,11 +371,11 @@ async function main() {
     gm.text().slice(0, 200),
   );
 
-  await mira.click('Attack on Titan');
+  await mira.clickCandidate('Attack on Titan');
   await gm.settle();
   await gm.click('Rollen verteilen');
   await mira.settle();
-  await mira.click('Antippen zum Aufdecken');
+  await mira.click('Aufdecken');
   check('Runde 2: Karte da', mira.text().includes('Dein Charakter'));
   check(
     'Impostor-Wissen aus: kein Impostor-Hinweis',
@@ -384,7 +394,7 @@ async function main() {
     !miraAgain.container.querySelector('.rolecard.shown'),
     miraAgain.text().slice(0, 200),
   );
-  await miraAgain.click('Antippen zum Aufdecken');
+  await miraAgain.click('Aufdecken');
   const charAfter = miraAgain.container.querySelector('.rolecard .name')?.textContent ?? '';
   check('Gleiche Rolle nach Reconnect', charBefore.length > 0 && charBefore === charAfter, `${charBefore} vs ${charAfter}`);
 
@@ -413,13 +423,13 @@ async function main() {
   );
 
   await solo.click('Los geht');
-  await solo.click('Harry Potter');
+  await solo.clickCandidate('Harry Potter');
   await solo.click('Rollen verteilen');
   check('Übergabe-Screen zuerst', solo.text().includes('Handy weitergeben an'), solo.text().slice(0, 250));
   for (let i = 0; i < 4; i++) {
     await solo.click(/Ich bin .* – Karte zeigen/);
     check(`Karte ${i + 1} verdeckt`, !solo.container.querySelector('.rolecard.shown'));
-    await solo.click('Antippen zum Aufdecken');
+    await solo.click('Aufdecken');
     check(`Karte ${i + 1} sichtbar`, solo.text().includes('Dein Charakter'));
     await solo.click(i < 3 ? 'Gesehen – weitergeben' : 'Gesehen – alle fertig');
   }

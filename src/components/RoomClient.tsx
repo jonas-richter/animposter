@@ -17,6 +17,7 @@ import VotingFlow from './VotingFlow';
 import Results from './Results';
 import GearSheet from './GearSheet';
 import CustomTopicSheet from './CustomTopicSheet';
+import TopicVote from './TopicVote';
 import { Avatar, Sheet, Stepper } from './ui';
 
 const POLL_MS = 800;
@@ -362,28 +363,10 @@ export default function RoomClient({ code }: { code: string }) {
       {/* ---------------------------- TOPIC VOTE --------------------------- */}
       {view.phase === 'topicVote' && (
         <>
-          <h2>Welches Universum?</h2>
-          <div className="stack">
-            {view.topics.map((t) => {
-              const mine = Object.values(view.myTopicVotes).includes(t.id);
-              return (
-                <button
-                  key={t.id}
-                  className={`select-target${mine ? ' sel' : ''}`}
-                  disabled={view.mySeatIds.length === 0}
-                  onClick={() => {
-                    for (const seatId of view.mySeatIds) {
-                      safeAct({ type: 'voteTopic', seatId, topicId: t.id });
-                    }
-                  }}
-                >
-                  <span className="check">✓</span>
-                  <span className="grow">{t.name}</span>
-                  {t.votes > 0 && <span className="tally">{t.votes}</span>}
-                </button>
-              );
-            })}
-          </div>
+          <TopicVote
+            view={view}
+            onVote={(seatId, topicId) => safeAct({ type: 'voteTopic', seatId, topicId })}
+          />
 
           <button className="quiet block" onClick={() => setTopicSheetOpen(true)}>
             + Eigenes Thema

@@ -25,11 +25,18 @@ const ALLOWED_HOSTS = [
 // The library is TypeScript, so pull the URLs out textually instead of
 // compiling it. Good enough: every image lives in an `image: '...'` field.
 function collectUrls() {
-  const file = readFileSync(path.join(root, 'src', 'lib', 'characters.ts'), 'utf8');
   const urls = [];
-  const re = /image:\s*'([^']+)'/g;
+  // lib/images.ts holds the artwork paths; characters.ts may add explicit ones.
+  const imgFile = readFileSync(path.join(root, 'src', 'lib', 'images.ts'), 'utf8');
+  const width = (imgFile.match(/const WIDTH = (\d+)/) ?? [, '400'])[1];
+  const pathRe = /'([a-z0-9-]+\/images\/[^']+\.(?:png|jpe?g|gif|webp))'/gi;
   let m;
-  while ((m = re.exec(file)) !== null) urls.push(m[1]);
+  while ((m = pathRe.exec(imgFile)) !== null) {
+    urls.push(`https://static.wikia.nocookie.net/${m[1]}/revision/latest/scale-to-width-down/${width}`);
+  }
+  const charFile = readFileSync(path.join(root, 'src', 'lib', 'characters.ts'), 'utf8');
+  const re = /image:\s*'(https[^']+)'/g;
+  while ((m = re.exec(charFile)) !== null) urls.push(m[1]);
   const extra = process.argv.slice(2).filter((a) => a.startsWith('http'));
   return [...urls, ...extra];
 }
