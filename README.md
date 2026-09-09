@@ -174,15 +174,19 @@ falls jemand doch noch mit dem eigenen Gerät einsteigt.
 1. **Lobby** – Spieler sammeln, Zuschauer festlegen.
 2. **Themenwahl** – alle stimmen über das Universum ab. Der Gamemaster kann das Ergebnis
    übernehmen oder über das Auswahlfeld etwas anderes wählen.
-3. **Rollen ansehen** – jeder deckt seine Karte per Tap auf (Swipe geht auch). Der Gamemaster
-   sieht einen Fortschrittsbalken, wer schon geschaut hat.
-4. **Diskussion** – reihum ein Satz über den eigenen Charakter. Vage genug, dass ein Impostor
+3. **Themen-Auflösung** – alle Geräte zeigen gleichzeitig mit Konfetti, welches Universum
+   gewonnen hat, samt Balkendiagramm der Stimmen. Hat der Gamemaster das Ergebnis überstimmt,
+   steht das auch dort. Rollen gibt es in dieser Phase noch keine — auch nicht im Netzwerk-Tab.
+4. **Rollen ansehen** – jeder deckt seine Karte per Tap oder Wisch auf. Ob du Impostor bist,
+   steht klein und farblos unten auf der Karte selbst – ein farbiges Banner wäre vom Nachbarplatz
+   aus lesbar, ohne ein Wort zu entziffern. Darunter zeigt eine Liste, wer schon geschaut hat.
+5. **Diskussion** – reihum ein Satz über den eigenen Charakter. Vage genug, dass ein Impostor
    nicht sofort auffliegt, konkret genug, dass die anderen etwas merken.
-5. **Abstimmung** – jeder wählt genau so viele Verdächtige, wie es Impostor gibt (Standard: 2).
+6. **Abstimmung** – jeder wählt genau so viele Verdächtige, wie es Impostor gibt (Standard: 2).
    Angezeigt wird nur, **ob** jemand gewählt hat – nie, für wen.
-6. **Auflösung** – wer hatte welchen Charakter, wer war Impostor, die Gemeinsamkeiten, die
+7. **Auflösung** – wer hatte welchen Charakter, wer war Impostor, die Gemeinsamkeiten, die
    Stolpersteine, das Voting-Ergebnis und die Punkte.
-7. **Nächste Runde** – Lobby bleibt bestehen, neue Auslosung.
+8. **Nächste Runde** – Lobby bleibt bestehen, neue Auslosung.
 
 ### Punkte
 

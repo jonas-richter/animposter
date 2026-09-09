@@ -13,9 +13,13 @@ import type { RoomView } from '@/lib/types';
 export default function TopicVote({
   view,
   onVote,
+  onApprove,
+  onRemove,
 }: {
   view: RoomView;
   onVote: (seatId: string, topicId: string) => void;
+  onApprove: (topicId: string) => void;
+  onRemove: (topicId: string) => void;
 }) {
   const mySeats = useMemo(
     () =>
@@ -156,7 +160,42 @@ export default function TopicVote({
               onClick={() => pick(t.id)}
             >
               <span className="check">✓</span>
-              <span className="grow">{t.name}</span>
+              <span className="grow">
+                {t.name}
+                {t.proposedBy && (
+                  <span className="tiny" style={{ display: 'block', fontWeight: 500 }}>
+                    Vorschlag von {t.proposedBy}
+                    {t.pending && ' · wartet auf Freigabe'}
+                  </span>
+                )}
+              </span>
+              {view.isGm && t.pending && (
+                <span
+                  className="chip"
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onApprove(t.id);
+                  }}
+                >
+                  Freigeben
+                </span>
+              )}
+              {view.isGm && t.proposedBy && (
+                <span
+                  className="chip danger"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${t.name} entfernen`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(t.id);
+                  }}
+                >
+                  ✕
+                </span>
+              )}
               {multi && mine.length > 0 && (
                 <span className="mini-orbs">
                   {mine.map((n) => (

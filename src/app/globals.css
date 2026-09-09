@@ -8,7 +8,9 @@
   --bg: #08080f;
   --ink: #f4f2ff;
   --ink-dim: #9d9ab8;
-  --ink-faint: #6b6885;
+  /* lifted from #6b6885: that sat around 3.7:1 on the dark background, below
+     the 4.5:1 needed for small text */
+  --ink-faint: #8b87aa;
 
   --panel: rgba(255, 255, 255, 0.045);
   --panel-2: rgba(255, 255, 255, 0.075);
@@ -137,7 +139,10 @@ body::after {
 h1 {
   margin: 0;
   font-size: clamp(44px, 15vw, 64px);
-  line-height: 0.92;
+  /* background-clip:text crops to the glyph box - a tight line-height shaves
+     the top of the caps and the tail of a descender. */
+  line-height: 1.04;
+  padding-bottom: 0.04em;
   font-weight: 900;
   letter-spacing: -0.045em;
   background: linear-gradient(96deg, #fff 10%, var(--violet) 55%, var(--pink) 95%);
@@ -214,6 +219,10 @@ button:active:not(:disabled) {
   transform: translateY(4px);
   box-shadow: 0 0 0 rgba(0, 0, 0, 0);
 }
+/* gradient buttons move by their own lip height so face and lip meet exactly */
+button.grad:active:not(:disabled) {
+  transform: translateY(var(--lip));
+}
 button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -223,24 +232,51 @@ button.block {
   width: 100%;
 }
 
+/* Gradient buttons.
+   The 3D lip used to be one flat colour under a two-colour face, which looked
+   wrong wherever the face had drifted towards the other end of the gradient.
+   Instead the lip is a darkened copy of the same gradient, sitting behind the
+   button (negative z-index paints behind the parent's own background).
+   No border either: a 1px transparent border lets the gradient bleed underneath
+   and shows up as a hairline along the top edge. */
+button.grad {
+  border: none;
+  color: #fff;
+  --lip: 5px;
+}
+button.grad::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: inherit;
+  transform: translateY(var(--lip));
+  filter: brightness(0.45) saturate(1.25);
+  transition: transform 0.06s ease;
+}
+button.grad:active:not(:disabled)::before {
+  opacity: 0;
+}
+button.grad:disabled::before {
+  filter: brightness(0.4) saturate(0.6);
+}
+
 button.primary {
   background: linear-gradient(140deg, var(--violet), var(--pink));
-  border-color: transparent;
-  color: #fff;
-  box-shadow: 0 5px 0 var(--violet-deep), 0 14px 30px rgba(123, 92, 255, 0.35);
+  box-shadow: 0 14px 30px rgba(123, 92, 255, 0.3);
 }
 button.primary:active:not(:disabled) {
-  box-shadow: 0 0 0 var(--violet-deep), 0 6px 16px rgba(123, 92, 255, 0.28);
+  box-shadow: 0 6px 16px rgba(123, 92, 255, 0.24);
 }
 
 button.go {
   background: linear-gradient(140deg, var(--mint), #17c98d);
-  border-color: transparent;
   color: #04231a;
-  box-shadow: 0 5px 0 var(--mint-deep), 0 14px 30px rgba(53, 224, 161, 0.28);
+  box-shadow: 0 14px 30px rgba(53, 224, 161, 0.24);
 }
 button.go:active:not(:disabled) {
-  box-shadow: 0 0 0 var(--mint-deep);
+  box-shadow: 0 6px 16px rgba(53, 224, 161, 0.2);
 }
 
 button.danger {
@@ -342,7 +378,9 @@ textarea {
   font-weight: 700;
   letter-spacing: 0.22em;
   text-indent: 0.22em;
-  line-height: 1.1;
+  /* trailing letter-spacing would otherwise cut the gradient short */
+  padding-right: 0.22em;
+  line-height: 1.18;
   background: linear-gradient(100deg, #fff, var(--pink));
   -webkit-background-clip: text;
   background-clip: text;
@@ -473,12 +511,22 @@ textarea {
   position: relative;
   width: 100%;
   aspect-ratio: 3 / 4.1;
-  max-height: 60dvh;
+  max-height: 58dvh;
   border-radius: var(--r-lg);
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
   perspective: 1400px;
+  /* We handle horizontal drags (the flip); the browser keeps vertical panning,
+     so the page still scrolls but no longer steals the swipe. */
+  touch-action: pan-y;
+}
+/* native image dragging would cancel the gesture halfway through */
+.rolecard img,
+.rolecard svg {
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
 }
 .rolecard .inner {
   position: absolute;
@@ -541,6 +589,9 @@ textarea {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Many wiki images are full-body shots. Cropping from the centre cuts the
+     head off - anchoring to the top keeps the face, which is the whole point. */
+  object-position: top center;
   display: block;
 }
 /* holographic sheen */
@@ -567,23 +618,19 @@ textarea {
   line-height: 1.15;
 }
 
-.verdict {
-  border-radius: var(--r);
-  padding: 15px 16px;
-  text-align: center;
-  font-weight: 850;
-  font-size: 17px;
-  border: 1px solid;
+/* Deliberately colourless and small: someone glancing across the table must not
+   be able to tell impostor from crew without actually reading it. */
+.role-status {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-dim);
 }
-.verdict.imp {
-  background: rgba(255, 77, 109, 0.14);
-  border-color: rgba(255, 77, 109, 0.5);
-  color: #ffb3c1;
-}
-.verdict.crew {
-  background: rgba(53, 224, 161, 0.1);
-  border-color: rgba(53, 224, 161, 0.35);
-  color: #a7f2d6;
+.role-status::before {
+  content: '🎭';
+  margin-right: 6px;
+  opacity: 0.7;
 }
 
 /* ---------- handoff ---------- */
@@ -602,7 +649,8 @@ textarea {
   font-size: clamp(34px, 11vw, 46px);
   font-weight: 900;
   letter-spacing: -0.04em;
-  line-height: 1.05;
+  line-height: 1.15;
+  padding-bottom: 0.04em;
   margin: 8px 0 6px;
   background: linear-gradient(100deg, var(--violet), var(--pink));
   -webkit-background-clip: text;
@@ -702,6 +750,7 @@ textarea {
   padding: 13px 16px;
   font-size: 15px;
   border: 1px solid;
+  animation: enter 0.3s ease backwards;
 }
 .note.err {
   background: rgba(255, 77, 109, 0.12);
@@ -750,6 +799,7 @@ textarea {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: top center;
   display: block;
 }
 .face-card .nm {
@@ -808,6 +858,7 @@ ul.bullets li::marker {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: top center;
   display: block;
 }
 .rank {
@@ -1128,4 +1179,774 @@ details summary {
 .progress > i {
   position: relative;
   overflow: hidden;
+}
+
+/* ==========================================================================
+   Winning-topic announcement
+   ========================================================================== */
+
+.confetti {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  overflow: hidden;
+}
+.confetti span {
+  position: absolute;
+  top: -8vh;
+  opacity: 0;
+  animation-name: fall;
+  animation-timing-function: cubic-bezier(0.35, 0.1, 0.6, 1);
+  animation-fill-mode: forwards;
+}
+@keyframes fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+  }
+  8% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drift), 108vh, 0) rotate(var(--spin));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti {
+    display: none;
+  }
+}
+
+.winner {
+  text-align: center;
+  padding: 30px 20px 26px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--edge);
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(123, 92, 255, 0.3), transparent 70%),
+    var(--panel);
+  animation: winner-in 0.6s cubic-bezier(0.2, 1.5, 0.4, 1) backwards;
+}
+@keyframes winner-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86) translateY(10px);
+  }
+}
+.winner-name {
+  font-size: clamp(34px, 11vw, 50px);
+  font-weight: 900;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+  padding-bottom: 0.04em;
+  margin: 6px 0 4px;
+  background: linear-gradient(100deg, #fff 5%, var(--violet) 55%, var(--pink) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+.bar-name {
+  width: 34%;
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+.bar-track {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  animation: grow 0.7s cubic-bezier(0.2, 1, 0.3, 1) backwards;
+}
+.bar-fill.win {
+  background: linear-gradient(90deg, var(--violet), var(--pink));
+}
+.bar-num {
+  width: 18px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+  flex: none;
+}
+@keyframes grow {
+  from {
+    width: 0 !important;
+  }
+}
+
+
+/* ==========================================================================
+   Reveal-phase roster - who already looked at their card
+   ========================================================================== */
+
+.roster {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+}
+.roster-count {
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+.chip-player .state {
+  font-weight: 900;
+  font-size: 13px;
+  flex: none;
+}
+.chip-player.ready {
+  border-color: rgba(53, 224, 161, 0.45);
+  background: rgba(53, 224, 161, 0.1);
+}
+.chip-player.ready .state {
+  color: var(--mint);
+}
+.chip-player.waiting {
+  opacity: 0.6;
+}
+.chip-player.waiting .state {
+  color: var(--ink-faint);
+  animation: blink 1.4s ease-in-out infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 1; }
+}
+
+/* ==========================================================================
+   Landing page
+   ========================================================================== */
+
+.landing {
+  gap: 20px;
+}
+
+.hero {
+  text-align: center;
+  padding-top: 4dvh;
+}
+
+/* Three real character cards plus one face-down, fanned out and drifting. */
+.hero-cards {
+  position: relative;
+  height: 190px;
+  margin-bottom: 18px;
+}
+.hero-card {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 116px;
+  height: 158px;
+  margin-left: -58px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--edge-2);
+  background: linear-gradient(165deg, #1d1740, #100d20);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  animation: float 7s ease-in-out infinite;
+}
+.hero-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+.hero-card.c0 {
+  transform: translateX(-104px) rotate(-13deg);
+  animation-delay: 0s;
+}
+.hero-card.c1 {
+  transform: translateX(-8px) rotate(-2deg) translateY(-12px);
+  animation-delay: 0.5s;
+  z-index: 2;
+}
+.hero-card.c2 {
+  transform: translateX(88px) rotate(11deg);
+  animation-delay: 1s;
+}
+.hero-card.back {
+  transform: translateX(150px) rotate(20deg) translateY(22px);
+  animation-delay: 1.6s;
+  display: grid;
+  place-items: center;
+  background:
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.05) 0 8px, transparent 8px 16px),
+    linear-gradient(165deg, #2a1b62, #14102c);
+}
+.hero-card.back .q {
+  font-size: 46px;
+  font-weight: 900;
+  background: linear-gradient(120deg, var(--violet), var(--pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@keyframes float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-card {
+    animation: none;
+  }
+}
+
+button.big {
+  min-height: 66px;
+  font-size: 19px;
+}
+
+.scan-btn {
+  width: 58px;
+  min-height: 58px;
+  padding: 0;
+  font-size: 22px;
+  border-radius: var(--r);
+  flex: none;
+}
+
+/* topic names drifting past, purely decorative */
+.marquee {
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+.marquee > div {
+  display: flex;
+  gap: 10px;
+  width: max-content;
+  animation: slide 34s linear infinite;
+}
+.marquee span {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  background: var(--panel);
+  color: var(--ink-dim);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+@keyframes slide {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee > div {
+    animation: none;
+  }
+}
+
+/* ---------- QR scanner ---------- */
+
+.scanner {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: #000;
+}
+.scanner video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.scanner-frame {
+  position: absolute;
+  inset: 16%;
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  border-radius: 20px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+}
+
+/* ==========================================================================
+   Countdown, emotes, podium
+   ========================================================================== */
+
+.countdown {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--r);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+}
+.countdown .clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  flex: none;
+}
+.countdown .bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+.countdown .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--violet), var(--pink));
+  transition: width 0.25s linear;
+}
+.countdown.urgent .clock {
+  color: var(--danger);
+  animation: pulse 1s ease-in-out infinite;
+}
+.countdown.urgent .bar i {
+  background: linear-gradient(90deg, var(--danger), #ff9770);
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+.countdown.big {
+  flex-direction: column;
+  gap: 8px;
+  border: none;
+  background: none;
+}
+.countdown.big .clock {
+  font-size: clamp(56px, 12vw, 120px);
+}
+.countdown.big .bar {
+  width: min(560px, 70vw);
+  height: 12px;
+}
+
+/* ---------- emotes ---------- */
+
+.reaction-bar {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.react-btn {
+  min-height: 48px;
+  width: 48px;
+  padding: 0;
+  font-size: 22px;
+  border-radius: 50%;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.4);
+}
+.react-btn:disabled {
+  opacity: 0.3;
+}
+
+.reaction-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 55;
+  overflow: hidden;
+}
+.reaction {
+  position: absolute;
+  bottom: 12%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation-name: rise;
+  animation-timing-function: cubic-bezier(0.3, 0.8, 0.4, 1);
+  animation-fill-mode: forwards;
+}
+.reaction .emoji {
+  font-size: 46px;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.6));
+}
+.reaction .who {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ink-dim);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-top: -4px;
+}
+@keyframes rise {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.5);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0) scale(1.15);
+  }
+  30% {
+    transform: translateY(-20px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-46vh) scale(0.9);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reaction {
+    animation-duration: 1.2s !important;
+  }
+}
+
+/* ---------- podium ---------- */
+
+.podium {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 1fr;
+  align-items: end;
+  gap: 8px;
+  text-align: center;
+}
+.place {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.place .av {
+  width: 46px;
+  height: 46px;
+  font-size: 16px;
+}
+.place .nm {
+  font-weight: 800;
+  font-size: 14px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.place .score {
+  font-size: 13px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.place .crown {
+  font-size: 26px;
+}
+.place [class^='block-'] {
+  width: 100%;
+  border-radius: 14px 14px 0 0;
+  font-weight: 900;
+  font-size: 22px;
+  color: rgba(0, 0, 0, 0.4);
+  display: grid;
+  place-items: center;
+  margin-top: 6px;
+  animation: grow-up 0.6s cubic-bezier(0.2, 1.3, 0.4, 1) backwards;
+}
+.place .block-1 {
+  height: 108px;
+  background: linear-gradient(180deg, #ffd977, var(--gold));
+}
+.place .block-2 {
+  height: 76px;
+  background: linear-gradient(180deg, #e9e9f5, #b9b8cc);
+  animation-delay: 0.1s;
+}
+.place .block-3 {
+  height: 56px;
+  background: linear-gradient(180deg, #e0a678, #b7784a);
+  animation-delay: 0.2s;
+}
+@keyframes grow-up {
+  from {
+    transform: scaleY(0.1);
+    transform-origin: bottom;
+    opacity: 0;
+  }
+}
+.podium-wrap.big .place .av {
+  width: 76px;
+  height: 76px;
+  font-size: 26px;
+}
+.podium-wrap.big .place .nm {
+  font-size: 22px;
+}
+.podium-wrap.big .place .block-1 {
+  height: 190px;
+}
+.podium-wrap.big .place .block-2 {
+  height: 136px;
+}
+.podium-wrap.big .place .block-3 {
+  height: 100px;
+}
+
+/* ==========================================================================
+   Host screen (TV)
+   ========================================================================== */
+
+.host {
+  min-height: 100dvh;
+  padding: 3vmin 4vmin;
+  display: flex;
+  flex-direction: column;
+  gap: 2vmin;
+}
+.host-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.host-brand {
+  font-weight: 900;
+  font-size: clamp(20px, 2.4vw, 34px);
+  letter-spacing: -0.03em;
+  background: linear-gradient(90deg, var(--violet), var(--pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.host-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(18px, 2.2vw, 30px);
+  letter-spacing: 0.28em;
+  color: var(--ink-dim);
+}
+.host-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.4vmin;
+  text-align: center;
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+.host-center.wide {
+  max-width: 1400px;
+}
+.host-title {
+  font-size: clamp(40px, 7vw, 104px);
+  line-height: 1.05;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  margin: 0;
+  padding-bottom: 0.04em;
+  background: linear-gradient(96deg, #fff 15%, var(--violet) 60%, var(--pink) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.host-title.glow {
+  filter: drop-shadow(0 0 40px rgba(123, 92, 255, 0.35));
+}
+.host-sub {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: clamp(15px, 1.7vw, 26px);
+}
+.host-join {
+  display: flex;
+  align-items: center;
+  gap: 4vmin;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.host-qr {
+  background: #fff;
+  padding: 1.4vmin;
+  border-radius: 2vmin;
+  width: clamp(150px, 22vmin, 300px);
+}
+.host-qr img {
+  width: 100%;
+  display: block;
+}
+.host-bigcode {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(56px, 11vw, 160px);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  padding-right: 0.16em;
+  line-height: 1.1;
+  background: linear-gradient(100deg, #fff, var(--pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.host-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1vmin;
+  justify-content: center;
+}
+.host-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 1vmin;
+  padding: 0.9vmin 1.8vmin 0.9vmin 0.9vmin;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  font-weight: 700;
+  font-size: clamp(14px, 1.6vw, 24px);
+  animation: pop 0.4s cubic-bezier(0.3, 1.5, 0.5, 1) backwards;
+}
+.host-chip .av {
+  width: 1.9em;
+  height: 1.9em;
+  font-size: 0.55em;
+}
+.host-chip.done {
+  border-color: rgba(53, 224, 161, 0.5);
+  background: rgba(53, 224, 161, 0.12);
+}
+.host-chip.done .st {
+  color: var(--mint);
+}
+.host-chip.spec {
+  opacity: 0.5;
+}
+.host-topics {
+  display: flex;
+  flex-direction: column;
+  gap: 1vmin;
+  width: min(760px, 84vw);
+}
+.host-topic {
+  display: flex;
+  align-items: center;
+  gap: 2vmin;
+  padding: 1.4vmin 2.4vmin;
+  border-radius: var(--r);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  font-size: clamp(16px, 2vw, 30px);
+  font-weight: 700;
+  text-align: left;
+}
+.host-topic.has {
+  border-color: var(--violet);
+  background: rgba(123, 92, 255, 0.16);
+}
+.host-topic .n {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+.host-versus {
+  display: flex;
+  align-items: center;
+  gap: 3vmin;
+}
+.host-versus figure {
+  margin: 0;
+  width: clamp(120px, 20vmin, 260px);
+  border-radius: 2vmin;
+  overflow: hidden;
+  border: 2px solid rgba(53, 224, 161, 0.5);
+}
+.host-versus figure.imp {
+  border-color: rgba(255, 77, 109, 0.6);
+}
+.host-versus figure img,
+.host-versus figure svg {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+.host-versus figcaption {
+  padding: 1vmin;
+  font-weight: 800;
+  font-size: clamp(13px, 1.4vw, 20px);
+  background: rgba(0, 0, 0, 0.35);
+}
+.host-versus .vs {
+  font-weight: 900;
+  color: var(--ink-faint);
+}
+.host-scores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1vmin;
+  width: 100%;
+}
+.host-score {
+  display: flex;
+  align-items: center;
+  gap: 1.4vmin;
+  padding: 1.2vmin 2vmin;
+  border-radius: var(--r);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  font-size: clamp(14px, 1.5vw, 22px);
+  font-weight: 700;
+}
+.host-score .rk {
+  color: var(--ink-faint);
+  font-weight: 900;
+  width: 1.6em;
+}
+.host-score .plus {
+  color: var(--mint);
+  font-weight: 900;
+}
+.host-score .tot {
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.host-waiting {
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: clamp(12px, 1.3vw, 18px);
+}
+
+.tv-link {
+  display: block;
+  text-align: center;
+  padding: 12px;
+  border-radius: var(--r);
+  border: 1px dashed var(--edge-2);
+  color: var(--ink-dim);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 15px;
+}
+.tv-link:active {
+  color: var(--ink);
 }

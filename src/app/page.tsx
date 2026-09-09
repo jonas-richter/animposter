@@ -3,6 +3,25 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createRoom, fetchHealth, saveToken } from '@/lib/client';
+import CodeScanner, { scannerSupported } from '@/components/CodeScanner';
+
+// A few real characters for the hero stack. Hardcoded rather than imported from
+// the library so the landing page does not pull the whole 80-pair file into the
+// client bundle.
+const HERO = [
+  {
+    name: 'Zoro',
+    src: 'https://static.wikia.nocookie.net/onepiece/images/5/52/Roronoa_Zoro_Anime_Post_Timeskip_Infobox.png/revision/latest/scale-to-width-down/300',
+  },
+  {
+    name: 'Gojo',
+    src: 'https://static.wikia.nocookie.net/jujutsu-kaisen/images/e/ef/Satoru_Gojo_%28Anime_2%29.png/revision/latest/scale-to-width-down/300',
+  },
+  {
+    name: 'Levi',
+    src: 'https://static.wikia.nocookie.net/shingekinokyojin/images/9/94/Levi_Ackerman_character_image.png/revision/latest/scale-to-width-down/300',
+  },
+];
 
 export default function HomePage() {
   const router = useRouter();
@@ -10,14 +29,21 @@ export default function HomePage() {
   const [error, setError] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [storageBroken, setStorageBroken] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [canScan, setCanScan] = useState(false);
 
-  // Warn loudly when rooms cannot survive between requests - otherwise players
-  // just get thrown out with "Raum nicht gefunden" and nobody knows why.
   useEffect(() => {
+    setCanScan(scannerSupported());
     fetchHealth()
       .then((h) => setStorageBroken(!h.reliable))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(''), 6000);
+    return () => clearTimeout(t);
+  }, [error]);
 
   async function create() {
     setError('');
@@ -32,20 +58,32 @@ export default function HomePage() {
     }
   }
 
-  function join() {
-    const code = joinCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (code.length < 4) {
+  function go(code: string) {
+    const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (clean.length < 4) {
       setError('Der Raumcode hat 4 Zeichen.');
       return;
     }
-    router.push(`/join/${code}`);
+    router.push(`/join/${clean}`);
   }
 
   return (
-    <main className="shell">
-      <div style={{ marginTop: '9dvh' }}>
+    <main className="shell landing">
+      <div className="hero">
+        <div className="hero-cards" aria-hidden="true">
+          {HERO.map((c, i) => (
+            <span key={c.name} className={`hero-card c${i}`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={c.src} alt="" loading="eager" />
+            </span>
+          ))}
+          <span className="hero-card back">
+            <span className="q">?</span>
+          </span>
+        </div>
+
         <h1>Impostor</h1>
-        <p className="lead" style={{ marginTop: 12 }}>
+        <p className="lead">
           Alle bekommen denselben Charakter — bis auf ein paar Fälschungen. Redet, hört genau hin,
           enttarnt sie.
         </p>
@@ -60,38 +98,95 @@ export default function HomePage() {
 
       {error && <div className="note err">{error}</div>}
 
-      <div className="spacer" />
-
-      <button className="primary block" onClick={create} disabled={busy}>
+      <button className="grad primary block big" onClick={create} disabled={busy}>
         {busy ? 'Moment …' : 'Raum erstellen'}
       </button>
 
       <div className="panel stack">
         <span className="eyebrow">Oder beitreten</span>
-        <input
-          className="code-input"
-          type="text"
-          inputMode="text"
-          autoCapitalize="characters"
-          autoCorrect="off"
-          autoComplete="off"
-          placeholder="CODE"
-          value={joinCode}
-          maxLength={8}
-          onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-          onKeyDown={(e) => e.key === 'Enter' && join()}
-          aria-label="Raumcode"
-        />
-        <button className="block" onClick={join} disabled={joinCode.length < 4}>
-          Beitreten
-        </button>
+        <div className="row">
+          <input
+            className="code-input grow"
+            type="text"
+            inputMode="text"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            autoComplete="off"
+            placeholder="CODE"
+            value={joinCode}
+            maxLength={8}
+            onChange={(e) => {
+              const next = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+              setJoinCode(next);
+              // Room codes are exactly four characters - no reason to make
+              // people reach for a second button.
+              if (next.length === 4) setTimeout(() => go(next), 120);
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && go(joinCode)}
+            aria-label="Raumcode"
+          />
+          {canScan && (
+            <button
+              className="chip scan-btn"
+              onClick={() => setScanOpen(true)}
+              aria-label="QR-Code scannen"
+              type="button"
+            >
+              📷
+            </button>
+          )}
+        </div>
+        <p className="tiny">
+          {canScan
+            ? 'Oder tippe auf die Kamera und scanne den QR-Code.'
+            : 'Auf dem iPhone einfach die Kamera-App auf den QR-Code halten.'}
+        </p>
+      </div>
+
+      <div className="spacer" />
+
+      <div className="marquee" aria-hidden="true">
+        <div>
+          {[
+            'One Piece',
+            'Naruto',
+            'Jujutsu Kaisen',
+            'Attack on Titan',
+            'Demon Slayer',
+            'My Hero Academia',
+            'Dragon Ball',
+            'Death Note',
+            'Harry Potter',
+            'Marvel',
+          ]
+            .concat([
+              'One Piece',
+              'Naruto',
+              'Jujutsu Kaisen',
+              'Attack on Titan',
+              'Demon Slayer',
+            ])
+            .map((t, i) => (
+              <span key={i}>{t}</span>
+            ))}
+        </div>
       </div>
 
       <p className="tiny center">
-        4–24 Spieler · ~5 Minuten pro Runde
+        4–24 Spieler · ~5 Minuten pro Runde · 80 Charakterpaare
         <br />
         Ein Handy pro Person — oder eins für mehrere, das geht auch.
       </p>
+
+      {scanOpen && (
+        <CodeScanner
+          onClose={() => setScanOpen(false)}
+          onCode={(code) => {
+            setScanOpen(false);
+            go(code);
+          }}
+        />
+      )}
     </main>
   );
 }

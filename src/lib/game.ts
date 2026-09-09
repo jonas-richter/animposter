@@ -1,6 +1,15 @@
 import { randomBytes, randomUUID } from 'crypto';
 import { BUILTIN_TOPICS } from './characters';
-import type { Assignment, CharacterPair, Device, Room, Round, Seat, Topic } from './types';
+import type {
+  Assignment,
+  CharacterPair,
+  Device,
+  Reaction,
+  Room,
+  Round,
+  Seat,
+  Topic,
+} from './types';
 
 export class GameError extends Error {}
 
@@ -10,7 +19,9 @@ function fail(m: string): never {
 
 export const MAX_SEATS = 24;
 export const MAX_NAME_LEN = 24;
-export const ONLINE_WINDOW_MS = 20_000;
+// Coarse on purpose: the heartbeat write is throttled to ~45s to save Redis
+// commands, and this only drives a cosmetic dot in the player list.
+export const ONLINE_WINDOW_MS = 90_000;
 
 // Ambiguous characters (0/O, 1/I) are excluded so a code is easy to type.
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -50,13 +61,27 @@ export function createRoom(code: string): { room: Room; device: Device } {
     devices: [device],
     seats: [],
     gmDeviceId: device.id,
-    settings: { impostorsKnow: true, impostorCount: 2 },
+    settings: {
+      impostorsKnow: true,
+      impostorCount: 2,
+      proposalsNeedApproval: false,
+      // On by default: the game should run itself, the game master is there to
+      // fix things, not to press "next" four times a round.
+      timerEnabled: true,
+      discussionSec: 120,
+      votingSec: 60,
+      targetScore: null,
+    },
     topicVotes: {},
     currentTopicId: null,
     round: null,
     roundCounter: 0,
     customTopics: [],
     usedPairIds: [],
+    deadline: null,
+    deadlineAction: null,
+    reactions: [],
+    lastReactionAt: {},
   };
   return { room, device };
 }
@@ -88,7 +113,12 @@ export function addDevice(room: Room): Device {
   return device;
 }
 
-export function addSeat(room: Room, deviceId: string | null, name: string): Seat {
+export function addSeat(
+  room: Room,
+  deviceId: string | null,
+  name: string,
+  waiting = false,
+): Seat {
   if (room.seats.length >= MAX_SEATS) fail(`Maximal ${MAX_SEATS} Spieler pro Raum.`);
   const clean = cleanName(name);
   if (room.seats.some((s) => s.name.toLowerCase() === clean.toLowerCase())) {
@@ -98,7 +128,9 @@ export function addSeat(room: Room, deviceId: string | null, name: string): Seat
     id: randomUUID(),
     name: clean,
     deviceId,
-    spectator: false,
+    // A newcomer sits out the running round but is in from the next one.
+    spectator: waiting,
+    waiting,
     playNextRound: true,
     score: 0,
     createdAt: Date.now(),
@@ -133,7 +165,12 @@ export function activeSeats(room: Room): Seat[] {
   return room.seats.filter((s) => s.playNextRound);
 }
 
-export function startRound(room: Room, topicId: string): void {
+/** True while a round is running and nobody may be dealt in. */
+export function roundInProgress(room: Room): boolean {
+  return ['topicReveal', 'reveal', 'discussion', 'voting'].includes(room.phase);
+}
+
+export function startRound(room: Room, topicId: string, overridden = false): void {
   const topic = topicById(room, topicId);
   if (!topic) fail('Unbekanntes Thema.');
 
@@ -145,6 +182,14 @@ export function startRound(room: Room, topicId: string): void {
       `Für ${impostorCount} Impostor werden mindestens ${minPlayers} mitspielende Spieler gebraucht (aktuell ${active.length}). Weniger Impostor einstellen oder mehr Spieler mitspielen lassen.`,
     );
   }
+
+  // Snapshot the vote before it is cleared, so the announcement screen can
+  // show how the decision came about.
+  const counts = topicTally(room);
+  const tallySnapshot = Object.entries(counts)
+    .map(([id, votes]) => ({ name: topicById(room, id)?.name ?? '?', votes }))
+    .sort((a, b) => b.votes - a.votes)
+    .slice(0, 5);
 
   const pair = pickPair(room, topic);
   room.usedPairIds.push(pair.id);
@@ -167,7 +212,11 @@ export function startRound(room: Room, topicId: string): void {
   }
 
   // Spectator flag is frozen for the round from the "play next round" toggle.
-  for (const seat of room.seats) seat.spectator = !seat.playNextRound;
+  // Everyone who was waiting is dealt in now.
+  for (const seat of room.seats) {
+    seat.spectator = !seat.playNextRound;
+    seat.waiting = false;
+  }
 
   room.roundCounter += 1;
   const round: Round = {
@@ -189,11 +238,18 @@ export function startRound(room: Room, topicId: string): void {
     impostorsKnow: room.settings.impostorsKnow,
     impostorCount,
     activeSeatIds: active.map((s) => s.id),
+    topicTally: tallySnapshot,
+    topicOverridden: overridden,
     points: {},
   };
+  // A suggestion that made it into a round is just a normal topic afterwards.
+  delete topic.proposedBy;
+  topic.approved = true;
+
   room.round = round;
   room.currentTopicId = topic.id;
-  room.phase = 'reveal';
+  // Announce the winning topic first; the cards follow when the GM continues.
+  room.phase = 'topicReveal';
   room.topicVotes = {};
 }
 
@@ -264,12 +320,21 @@ export function finishRound(room: Room): void {
   room.phase = 'results';
 }
 
+/** Has anybody reached the target score? Drives the results-screen button. */
+export function targetReached(room: Room): boolean {
+  const target = room.settings.targetScore;
+  return Boolean(target && room.seats.some((s) => s.score >= target));
+}
+
 export function nextRound(room: Room): void {
   room.round = null;
   room.phase = 'topicVote';
   room.topicVotes = {};
   room.currentTopicId = null;
-  for (const seat of room.seats) seat.spectator = !seat.playNextRound;
+  for (const seat of room.seats) {
+    seat.spectator = !seat.playNextRound;
+    seat.waiting = false;
+  }
 }
 
 /** Hand the game master role to another device; returns the new GM device id. */
@@ -322,4 +387,175 @@ export function topicVoteWinner(room: Room): string | null {
   const max = Math.max(...entries.map(([, c]) => c));
   const best = entries.filter(([, c]) => c === max).map(([id]) => id);
   return shuffle(best)[0];
+}
+
+
+// ---------------------------------------------------------------------------
+// Automatic phase progression
+//
+// There are no background jobs on serverless, so a phase does not advance on a
+// timer thread - it advances the moment any request notices that the deadline
+// has passed. Clients poll every 1-3s, so the delay is not noticeable.
+// ---------------------------------------------------------------------------
+
+const REVEAL_ANNOUNCE_MS = 7000; // how long the winning topic stays on screen
+const DEAL_PAUSE_MS = 2500; // beat between "all cards seen" and the discussion
+const TOPIC_VOTE_PAUSE_MS = 2500; // beat after the last topic vote
+
+/** Recompute when (and whether) the current phase should advance by itself. */
+export function syncDeadline(room: Room): void {
+  const now = Date.now();
+  // Countdown off means the game master drives every transition by hand.
+  if (!room.settings.timerEnabled) {
+    room.deadline = null;
+    room.deadlineAction = null;
+    return;
+  }
+  const set = (ms: number, action: Room['deadlineAction']) => {
+    room.deadline = now + ms;
+    room.deadlineAction = action;
+  };
+  const clear = () => {
+    room.deadline = null;
+    room.deadlineAction = null;
+  };
+
+  switch (room.phase) {
+    case 'topicVote': {
+      const active = activeSeats(room);
+      const everyoneVoted =
+        active.length > 0 && active.every((s) => room.topicVotes[s.id]);
+      const enough = active.length >= room.settings.impostorCount + 2;
+      if (everyoneVoted && enough) {
+        if (room.deadlineAction !== 'startRound') set(TOPIC_VOTE_PAUSE_MS, 'startRound');
+      } else clear();
+      return;
+    }
+    case 'topicReveal':
+      if (room.deadlineAction !== 'reveal') set(REVEAL_ANNOUNCE_MS, 'reveal');
+      return;
+    case 'reveal': {
+      if (everyoneRevealed(room)) {
+        if (room.deadlineAction !== 'discussion') set(DEAL_PAUSE_MS, 'discussion');
+      } else clear();
+      return;
+    }
+    case 'discussion':
+      if (room.settings.timerEnabled) {
+        if (room.deadlineAction !== 'voting') set(room.settings.discussionSec * 1000, 'voting');
+      } else clear();
+      return;
+    case 'voting':
+      if (room.settings.timerEnabled) {
+        if (room.deadlineAction !== 'finish') set(room.settings.votingSec * 1000, 'finish');
+      } else clear();
+      return;
+    default:
+      clear();
+  }
+}
+
+/**
+ * Apply any due transition. Returns true when something changed, so the caller
+ * knows it has to persist the room.
+ */
+export function applyDeadline(room: Room): boolean {
+  if (!room.deadline || Date.now() < room.deadline) return false;
+  const action = room.deadlineAction;
+  room.deadline = null;
+  room.deadlineAction = null;
+
+  try {
+    switch (action) {
+      case 'startRound': {
+        const winner = topicVoteWinner(room);
+        if (!winner) return true;
+        startRound(room, winner);
+        break;
+      }
+      case 'reveal':
+        if (room.phase === 'topicReveal') room.phase = 'reveal';
+        break;
+      case 'discussion':
+        if (room.phase === 'reveal') room.phase = 'discussion';
+        break;
+      case 'voting':
+        if (room.phase === 'discussion') room.phase = 'voting';
+        break;
+      case 'finish':
+        if (room.phase === 'voting') finishRound(room);
+        break;
+      default:
+        break;
+    }
+  } catch {
+    // A transition that is no longer valid (too few players, round already
+    // resolved) simply drops - the game master can always take over.
+  }
+  syncDeadline(room);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Emotes
+// ---------------------------------------------------------------------------
+
+export const REACTIONS = ['😂', '😮', '😭', '👏', '🤨', '🎭'] as const;
+const REACTION_COOLDOWN_MS = 2500;
+const REACTION_TTL_MS = 6000;
+
+export function addReaction(room: Room, seat: Seat, emoji: string): void {
+  if (!REACTIONS.includes(emoji as (typeof REACTIONS)[number])) {
+    fail('Unbekannte Reaktion.');
+  }
+  const last = room.lastReactionAt[seat.id] ?? 0;
+  if (Date.now() - last < REACTION_COOLDOWN_MS) {
+    fail('Immer mit der Ruhe.');
+  }
+  room.lastReactionAt[seat.id] = Date.now();
+  const reaction: Reaction = {
+    id: randomBytes(6).toString('hex'),
+    seatName: seat.name,
+    emoji,
+    at: Date.now(),
+  };
+  room.reactions = [...pruneReactions(room), reaction].slice(-24);
+}
+
+export function pruneReactions(room: Room): Reaction[] {
+  const cutoff = Date.now() - REACTION_TTL_MS;
+  return (room.reactions ?? []).filter((r) => r.at > cutoff);
+}
+
+// ---------------------------------------------------------------------------
+// End of game
+// ---------------------------------------------------------------------------
+
+export function standings(room: Room) {
+  return [...room.seats]
+    .sort((a, b) => b.score - a.score || a.createdAt - b.createdAt)
+    .map((s) => ({ seatId: s.id, seatName: s.name, score: s.score }));
+}
+
+export function endGame(room: Room): void {
+  room.phase = 'gameOver';
+  room.round = null;
+  room.deadline = null;
+  room.deadlineAction = null;
+}
+
+export function restartGame(room: Room): void {
+  for (const seat of room.seats) {
+    seat.score = 0;
+    seat.waiting = false;
+    seat.spectator = !seat.playNextRound;
+  }
+  room.phase = 'lobby';
+  room.round = null;
+  room.roundCounter = 0;
+  room.topicVotes = {};
+  room.currentTopicId = null;
+  room.usedPairIds = [];
+  room.deadline = null;
+  room.deadlineAction = null;
 }

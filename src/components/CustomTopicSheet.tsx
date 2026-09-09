@@ -19,7 +19,11 @@ export default function CustomTopicSheet({
   isGm,
 }: {
   onClose: () => void;
-  onSubmit: (json: string) => Promise<{ topicName: string; pairCount: number }>;
+  onSubmit: (json: string) => Promise<{
+    topicName: string;
+    pairCount: number;
+    pending?: boolean;
+  }>;
   onRemove: (topicId: string) => Promise<void>;
   topics: TopicMeta[];
   isGm: boolean;
@@ -49,7 +53,11 @@ export default function CustomTopicSheet({
     setOk('');
     try {
       const res = await onSubmit(text);
-      setOk(`"${res.topicName}" mit ${res.pairCount} Paaren wurde hinzugefügt.`);
+      setOk(
+        res.pending
+          ? `"${res.topicName}" ist als Vorschlag eingereicht — der Gamemaster gibt ihn frei.`
+          : `"${res.topicName}" mit ${res.pairCount} Paaren steht jetzt zur Wahl.`,
+      );
       saveTopicLocally({ name: res.topicName, json: text, addedAt: Date.now() });
       setSaved(loadSavedTopics());
       setJson('');
@@ -63,7 +71,7 @@ export default function CustomTopicSheet({
   const customTopics = topics.filter((t) => t.custom);
 
   return (
-    <Sheet title="Eigenes Thema hinzufügen" onClose={onClose}>
+    <Sheet title={isGm ? 'Eigenes Thema' : 'Thema vorschlagen'} onClose={onClose}>
       <div className="stack">
         <p className="tiny" style={{ margin: 0 }}>
           Schritt 1: Prompt kopieren, bei ChatGPT/Claude einfügen und das Wunschthema eintragen.
@@ -90,8 +98,8 @@ export default function CustomTopicSheet({
         />
         {error && <div className="note err">{error}</div>}
         {ok && <div className="note ok">{ok}</div>}
-        <button className="primary block" onClick={() => add(json)} disabled={busy || !json.trim()}>
-          {busy ? 'Prüfe …' : 'Thema hinzufügen'}
+        <button className="grad primary block" onClick={() => add(json)} disabled={busy || !json.trim()}>
+          {busy ? 'Prüfe …' : isGm ? 'Thema hinzufügen' : 'Vorschlag abschicken'}
         </button>
 
         {saved.length > 0 && (

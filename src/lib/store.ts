@@ -15,6 +15,14 @@ import type { Room } from './types';
 const ROOM_TTL_SECONDS = 60 * 60 * 8; // 8h, plenty for a game night
 const LOCK_TTL_MS = 4000;
 
+// Every polling client would otherwise cost one Redis command per tick. With
+// eight phones that is thousands of commands per hour - the Upstash free plan
+// allows 500k per MONTH. So each serverless instance keeps the room in memory
+// for a moment: reads within that window cost nothing, and the number of Redis
+// reads now scales with the number of warm instances instead of the number of
+// players. Writes always bypass the cache and refresh it.
+const READ_CACHE_MS = 900;
+
 function readEnv(...names: string[]): string | undefined {
   for (const n of names) {
     const v = process.env[n];
@@ -57,13 +65,14 @@ export function storageInfo() {
 interface MemoryState {
   rooms: Map<string, { room: Room; expiresAt: number }>;
   locks: Map<string, number>;
+  cache: Map<string, { room: Room; at: number }>;
 }
 
 const globalForMemory = globalThis as unknown as { __impostorMemory?: MemoryState };
 
 function memory(): MemoryState {
   if (!globalForMemory.__impostorMemory) {
-    globalForMemory.__impostorMemory = { rooms: new Map(), locks: new Map() };
+    globalForMemory.__impostorMemory = { rooms: new Map(), locks: new Map(), cache: new Map() };
   }
   return globalForMemory.__impostorMemory;
 }
@@ -72,6 +81,20 @@ function memory(): MemoryState {
 
 const key = (code: string) => `impostor:room:${code}`;
 const lockKey = (code: string) => `impostor:lock:${code}`;
+
+/**
+ * Read a room, allowing a slightly stale copy from this instance's cache.
+ * Only for the polling endpoint - never for anything that then writes.
+ */
+export async function getRoomCached(code: string): Promise<Room | null> {
+  if (!redis) return getRoom(code);
+  const hit = memory().cache.get(code);
+  if (hit && Date.now() - hit.at < READ_CACHE_MS) return hit.room;
+  const room = await getRoom(code);
+  if (room) memory().cache.set(code, { room, at: Date.now() });
+  else memory().cache.delete(code);
+  return room;
+}
 
 export async function getRoom(code: string): Promise<Room | null> {
   if (redis) {
@@ -92,6 +115,7 @@ export async function putRoom(room: Room): Promise<void> {
   room.updatedAt = Date.now();
   if (redis) {
     await redis.set(key(room.code), room, { ex: ROOM_TTL_SECONDS });
+    memory().cache.set(room.code, { room, at: Date.now() });
     return;
   }
   memory().rooms.set(room.code, {
@@ -101,6 +125,7 @@ export async function putRoom(room: Room): Promise<void> {
 }
 
 export async function deleteRoom(code: string): Promise<void> {
+  memory().cache.delete(code);
   if (redis) {
     await redis.del(key(code));
     return;

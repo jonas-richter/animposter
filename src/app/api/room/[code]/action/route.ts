@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import {
+  addReaction,
   addSeat,
   castVote,
+  endGame,
   cleanName,
   deviceByToken,
   everyoneVoted,
@@ -10,6 +12,8 @@ import {
   isGm,
   nextRound,
   removeDevice,
+  restartGame,
+  roundInProgress,
   seatsOf,
   startRound,
   topicById,
@@ -17,6 +21,7 @@ import {
   transferGm,
 } from '@/lib/game';
 import { deleteRoom, getRoom, withRoom } from '@/lib/store';
+import { afterMutation } from '@/lib/tick';
 import { handleError, noStore, normalizeCode, readJson, TOKEN_HEADER } from '@/lib/http';
 import { buildView } from '@/lib/view';
 import { LIMITS, parseCustomTopic } from '@/lib/validateTopic';
@@ -59,16 +64,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
       if (!device) throw new GameError('Nicht in diesem Raum angemeldet.');
       device.lastSeen = Date.now();
 
+      const out = handle(room, device);
+      // Whatever changed, the automatic clock has to match the new situation.
+      afterMutation(room);
+      return out;
+
+      function handle(room: Room, device: Device) {
       switch (type) {
         // ---- seats -------------------------------------------------------
         case 'addSeat': {
-          if (room.phase !== 'lobby' && room.phase !== 'topicVote' && room.phase !== 'results') {
-            throw new GameError('Neue Spieler können erst zwischen den Runden dazukommen.');
-          }
           if (!isGm(room, device) && seatsOf(room, device.id).length >= 8) {
             throw new GameError('Maximal 8 Spieler pro Gerät.');
           }
-          addSeat(room, device.id, cleanName(body.name));
+          // Mid-round additions wait for the next round instead of being refused.
+          addSeat(room, device.id, cleanName(body.name), roundInProgress(room));
           return {};
         }
         case 'renameSeat': {
@@ -102,7 +111,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
           if (!isGm(room, device) && seat.deviceId !== device.id) {
             throw new GameError('Nur der Gamemaster kann fremde Spieler entfernen.');
           }
-          if (room.phase !== 'lobby' && room.phase !== 'results') {
+          if (room.phase !== 'lobby' && room.phase !== 'results' && !seat.waiting) {
             throw new GameError('Spieler können nur zwischen den Runden entfernt werden.');
           }
           room.seats = room.seats.filter((s) => s.id !== seat.id);
@@ -150,7 +159,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
               'Noch hat niemand für ein Thema gestimmt. Wähle unten selbst eines aus.',
             );
           }
-          startRound(room, chosen);
+          const winner = topicVoteWinner(room);
+          startRound(room, chosen, Boolean(body.topicId) && chosen !== winner);
           return {};
         }
 
@@ -162,6 +172,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
           const a = round.assignments[seat.id];
           if (!a) throw new GameError('Dieser Spieler ist in dieser Runde Zuschauer.');
           a.revealed = true;
+          return {};
+        }
+        case 'startReveal': {
+          requireGm(room, device);
+          if (!room.round) throw new GameError('Es läuft gerade keine Runde.');
+          room.phase = 'reveal';
           return {};
         }
         case 'startDiscussion': {
@@ -203,11 +219,50 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
           return {};
         }
 
+        case 'react': {
+          const seat = ownSeat(room, device, body.seatId);
+          addReaction(room, seat, str(body.emoji, 'emoji'));
+          return {};
+        }
+        case 'endGame': {
+          requireGm(room, device);
+          endGame(room);
+          return {};
+        }
+        case 'restartGame': {
+          requireGm(room, device);
+          restartGame(room);
+          return {};
+        }
+
         // ---- settings (discreet gear menu) --------------------------------
         case 'updateSettings': {
           requireGm(room, device);
           if (typeof body.impostorsKnow === 'boolean') {
             room.settings.impostorsKnow = body.impostorsKnow;
+          }
+          if (typeof body.proposalsNeedApproval === 'boolean') {
+            room.settings.proposalsNeedApproval = body.proposalsNeedApproval;
+          }
+          if (typeof body.timerEnabled === 'boolean') {
+            room.settings.timerEnabled = body.timerEnabled;
+          }
+          if (typeof body.discussionSec === 'number') {
+            const n = Math.round(body.discussionSec);
+            if (n < 15 || n > 600) throw new GameError('Diskussion: 15 bis 600 Sekunden.');
+            room.settings.discussionSec = n;
+          }
+          if (typeof body.votingSec === 'number') {
+            const n = Math.round(body.votingSec);
+            if (n < 15 || n > 300) throw new GameError('Abstimmung: 15 bis 300 Sekunden.');
+            room.settings.votingSec = n;
+          }
+          if (body.targetScore === null || typeof body.targetScore === 'number') {
+            const n = body.targetScore === null ? null : Math.round(body.targetScore);
+            if (n !== null && (n < 3 || n > 200)) {
+              throw new GameError('Punkteziel: zwischen 3 und 200.');
+            }
+            room.settings.targetScore = n;
           }
           if (typeof body.impostorCount === 'number') {
             const n = Math.round(body.impostorCount);
@@ -250,8 +305,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
           if (room.customTopics.some((t) => t.name.toLowerCase() === topic.name.toLowerCase())) {
             throw new GameError(`Ein Thema mit dem Namen "${topic.name}" gibt es in diesem Raum schon.`);
           }
+          // The game master adds directly; everyone else makes a suggestion.
+          if (!isGm(room, device)) {
+            const mine = seatsOf(room, device.id);
+            topic.proposedBy = mine[0]?.name ?? 'Gast';
+            if (room.settings.proposalsNeedApproval) topic.approved = false;
+          }
           room.customTopics.push(topic);
-          return { topicId: topic.id, topicName: topic.name, pairCount: topic.pairs.length };
+          return {
+            topicId: topic.id,
+            topicName: topic.name,
+            pairCount: topic.pairs.length,
+            pending: topic.approved === false,
+          };
+        }
+        case 'approveCustomTopic': {
+          requireGm(room, device);
+          const id = str(body.topicId, 'topicId');
+          const topic = room.customTopics.find((t) => t.id === id);
+          if (!topic) throw new GameError('Thema nicht gefunden.');
+          topic.approved = true;
+          return {};
         }
         case 'removeCustomTopic': {
           requireGm(room, device);
@@ -266,6 +340,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
 
         default:
           throw new GameError(`Unbekannte Aktion: ${type}`);
+      }
       }
     });
 

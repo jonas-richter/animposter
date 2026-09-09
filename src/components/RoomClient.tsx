@@ -18,11 +18,29 @@ import Results from './Results';
 import GearSheet from './GearSheet';
 import CustomTopicSheet from './CustomTopicSheet';
 import TopicVote from './TopicVote';
+import TopicWinner from './TopicWinner';
 import { Avatar, Sheet, Stepper } from './ui';
+import Countdown from './Countdown';
+import Podium from './Podium';
+import { ReactionBar, ReactionLayer } from './Reactions';
+import { randomName } from '@/lib/names';
 
-const POLL_MS = 800;
-/** A room has to be missing this many polls in a row before we give up. */
-const MISS_LIMIT = 6;
+// How often to poll, per phase. Every tick can cost a Redis command, and the
+// Upstash free plan is 500k per month - so only the phases where something
+// actually changes second by second get a fast interval.
+const POLL_MS: Record<RoomView['phase'], number> = {
+  lobby: 2500,
+  topicVote: 1800,
+  topicReveal: 1500,
+  reveal: 1800,
+  discussion: 2500,
+  voting: 1200,
+  results: 3000,
+  gameOver: 4000,
+};
+const DEFAULT_POLL_MS = 2000;
+/** A room has to be missing this many seconds before we give up. */
+const MISS_LIMIT_MS = 12000;
 
 export default function RoomClient({ code }: { code: string }) {
   const router = useRouter();
@@ -42,10 +60,13 @@ export default function RoomClient({ code }: { code: string }) {
   );
   const [overrideTopic, setOverrideTopic] = useState('');
   const [copied, setCopied] = useState(false);
+  // Rotating example name, so the field is never a blank "z.B. Jonas".
+  const [nameHint] = useState(() => randomName());
 
   const polling = useRef(false);
   const bootstrapped = useRef(false);
-  const misses = useRef(0);
+  const missingSince = useRef(0);
+  const phaseRef = useRef<RoomView['phase']>('lobby');
 
   // --- session bootstrap (once per room) -----------------------------------
   useEffect(() => {
@@ -87,42 +108,63 @@ export default function RoomClient({ code }: { code: string }) {
   useEffect(() => {
     if (!token) return;
     let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
 
     async function tick() {
-      if (stopped || polling.current || document.hidden) return;
+      if (stopped || polling.current || document.hidden) {
+        schedule();
+        return;
+      }
       polling.current = true;
       try {
         const res = await fetchState(code, token!);
         if (stopped) return;
-        misses.current = 0;
+        missingSince.current = 0;
         setReconnecting(false);
+        phaseRef.current = res.view.phase;
         setView(res.view);
       } catch (e) {
         if (stopped) return;
         const msg = e instanceof Error ? e.message : '';
         if (/nicht gefunden|angemeldet/i.test(msg)) {
-          misses.current += 1;
+          if (missingSince.current === 0) missingSince.current = Date.now();
           setReconnecting(true);
-          if (misses.current >= MISS_LIMIT) {
+          if (Date.now() - missingSince.current >= MISS_LIMIT_MS) {
             setFatal(msg || 'Verbindung verloren.');
             stopped = true;
+            return;
           }
         }
       } finally {
         polling.current = false;
+        schedule();
       }
     }
 
-    const id = setInterval(tick, POLL_MS);
-    const onVisible = () => !document.hidden && tick();
+    function schedule() {
+      if (stopped) return;
+      clearTimeout(timer);
+      timer = setTimeout(tick, POLL_MS[phaseRef.current] ?? DEFAULT_POLL_MS);
+    }
+
+    const onVisible = () => {
+      if (!document.hidden) tick();
+    };
     document.addEventListener('visibilitychange', onVisible);
     tick();
     return () => {
       stopped = true;
-      clearInterval(id);
+      clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [code, token]);
+
+  // Errors should not sit there until the next action.
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(''), 6000);
+    return () => clearTimeout(t);
+  }, [error]);
 
   const act = useCallback(
     async (payload: Record<string, unknown>) => {
@@ -131,7 +173,10 @@ export default function RoomClient({ code }: { code: string }) {
       setError('');
       try {
         const res = await sendAction(code, token, payload);
-        if (res.view) setView(res.view);
+        if (res.view) {
+          phaseRef.current = res.view.phase;
+          setView(res.view);
+        }
         return res;
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Fehler.');
@@ -154,6 +199,8 @@ export default function RoomClient({ code }: { code: string }) {
     () => (view ? view.seats.filter((s) => view.mySeatIds.includes(s.id)) : []),
     [view],
   );
+  /** Joined mid-round: sit this one out, but see nothing secret. */
+  const inQueue = mySeats.length > 0 && mySeats.every((s) => s.waiting);
 
   // -------------------------------------------------------------------------
 
@@ -167,7 +214,7 @@ export default function RoomClient({ code }: { code: string }) {
           Deployment der Speicher — siehe README.
         </p>
         <button
-          className="primary block"
+          className="grad primary block"
           onClick={() => {
             clearToken(code);
             router.push('/');
@@ -178,7 +225,7 @@ export default function RoomClient({ code }: { code: string }) {
         <button
           className="quiet block"
           onClick={() => {
-            misses.current = 0;
+            missingSince.current = 0;
             setFatal('');
             bootstrapped.current = false;
             location.reload();
@@ -212,10 +259,12 @@ export default function RoomClient({ code }: { code: string }) {
   const phaseLabel: Record<RoomView['phase'], string> = {
     lobby: 'Lobby',
     topicVote: 'Thema',
+    topicReveal: 'Thema',
     reveal: 'Karten',
     discussion: 'Diskussion',
     voting: 'Abstimmung',
     results: 'Auflösung',
+    gameOver: 'Endstand',
   };
 
   async function shareLink() {
@@ -252,6 +301,13 @@ export default function RoomClient({ code }: { code: string }) {
         </button>
       </header>
 
+      {view.deadline && ['discussion', 'voting'].includes(view.phase) && (
+        <Countdown
+          deadline={view.deadline}
+          total={view.phase === 'discussion' ? view.settings?.discussionSec : view.settings?.votingSec}
+        />
+      )}
+
       {reconnecting && <div className="note warn">Verbindung wackelt — versuche es weiter …</div>}
       {error && <div className="note err">{error}</div>}
 
@@ -276,12 +332,18 @@ export default function RoomClient({ code }: { code: string }) {
             <button className="block" onClick={shareLink}>
               {copied ? '✓ Link kopiert' : 'Link teilen'}
             </button>
+            {view.isGm && (
+              <a className="tv-link" href={`/host/${code}`} target="_blank" rel="noreferrer">
+                📺 TV-Ansicht öffnen
+              </a>
+            )}
           </div>
 
           <div className="stack">
             <span className="eyebrow">
-              {view.seats.length} {view.seats.length === 1 ? 'Spieler' : 'Spieler'}
+              {view.seats.length} Spieler
               {view.spectatorCount > 0 && ` · ${view.spectatorCount} schauen zu`}
+              {view.waitingCount > 0 && ` · ${view.waitingCount} warten`}
             </span>
             <SeatChips view={view} onToggle={safeAct} onRemove={safeAct} />
             {view.seats.length === 0 ? (
@@ -299,7 +361,9 @@ export default function RoomClient({ code }: { code: string }) {
               <input
                 className="grow"
                 type="text"
-                placeholder={mySeats.length === 0 ? 'z.B. Jonas' : 'Name hinzufügen'}
+                placeholder={
+                  mySeats.length === 0 ? `z.B. ${nameHint}` : `z.B. ${nameHint}`
+                }
                 value={newSeatName}
                 maxLength={24}
                 onChange={(e) => setNewSeatName(e.target.value)}
@@ -311,7 +375,7 @@ export default function RoomClient({ code }: { code: string }) {
                 }}
               />
               <button
-                className="primary"
+                className="grad primary"
                 style={{ width: 62, padding: 0, fontSize: 26 }}
                 disabled={!newSeatName.trim() || busy}
                 onClick={() => {
@@ -348,7 +412,7 @@ export default function RoomClient({ code }: { code: string }) {
               </div>
 
               <button
-                className="go block"
+                className="grad go block"
                 disabled={busy || !canStart}
                 onClick={() => safeAct({ type: 'startTopicVote' })}
               >
@@ -366,10 +430,12 @@ export default function RoomClient({ code }: { code: string }) {
           <TopicVote
             view={view}
             onVote={(seatId, topicId) => safeAct({ type: 'voteTopic', seatId, topicId })}
+            onApprove={(topicId) => safeAct({ type: 'approveCustomTopic', topicId })}
+            onRemove={(topicId) => safeAct({ type: 'removeCustomTopic', topicId })}
           />
 
           <button className="quiet block" onClick={() => setTopicSheetOpen(true)}>
-            + Eigenes Thema
+            {view.isGm ? '+ Eigenes Thema' : '+ Thema vorschlagen'}
           </button>
 
           {view.isGm && (
@@ -384,7 +450,7 @@ export default function RoomClient({ code }: { code: string }) {
                 ))}
               </select>
               <button
-                className="go block"
+                className="grad go block"
                 disabled={busy}
                 onClick={() =>
                   safeAct(
@@ -404,8 +470,48 @@ export default function RoomClient({ code }: { code: string }) {
         </>
       )}
 
+      {/* ------------------------------- QUEUE ------------------------------ */}
+      {inQueue && (
+        <>
+          <div className="winner">
+            <span className="eyebrow">Du bist dabei</span>
+            <div className="winner-name">
+              {mySeats.length === 1 ? mySeats[0].name : `${mySeats.length} Spieler`}
+            </div>
+            <p className="muted" style={{ margin: 0 }}>
+              Die Runde läuft schon — ab der nächsten bist du dabei.
+            </p>
+          </div>
+
+          <div className="roster">
+            <span className="eyebrow">Läuft gerade</span>
+            <div className="players">
+              {playing.map((s) => (
+                <span key={s.id} className="chip-player">
+                  <Avatar name={s.name} />
+                  <span className="nm">{s.name}</span>
+                </span>
+              ))}
+            </div>
+            <p className="tiny">
+              Rollen bekommst du bewusst nicht zu sehen — sonst wüsstest du die Auflösung schon.
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* --------------------------- TOPIC WINNER --------------------------- */}
+      {view.phase === 'topicReveal' && !inQueue && (
+        <TopicWinner
+          view={view}
+          isGm={view.isGm}
+          busy={busy}
+          onContinue={() => safeAct({ type: 'startReveal' })}
+        />
+      )}
+
       {/* ------------------------------ REVEAL ----------------------------- */}
-      {view.phase === 'reveal' && (
+      {view.phase === 'reveal' && !inQueue && (
         <>
           {view.myRoles.length > 0 ? (
             <RevealFlow
@@ -420,32 +526,45 @@ export default function RoomClient({ code }: { code: string }) {
             <p className="muted center">Du schaust diese Runde zu.</p>
           )}
 
-          <div className="panel stack">
+          <div className="roster">
             <div className="row">
-              <span className="eyebrow grow">Karten gesehen</span>
-              <strong>
+              <span className="eyebrow grow">
+                {revealed === playing.length
+                  ? 'Alle haben ihre Karte'
+                  : `${revealed} von ${playing.length} haben geschaut`}
+              </span>
+              <span className="roster-count">
                 {revealed}/{playing.length}
-              </strong>
+              </span>
             </div>
-            <div className="progress">
-              <i style={{ width: `${playing.length ? (revealed / playing.length) * 100 : 0}%` }} />
+            <div className="players">
+              {playing.map((s) => (
+                <span key={s.id} className={`chip-player${s.revealed ? ' ready' : ' waiting'}`}>
+                  <Avatar name={s.name} />
+                  <span className="nm">{s.name}</span>
+                  <span className="state">{s.revealed ? '✓' : '…'}</span>
+                </span>
+              ))}
             </div>
+            {revealed < playing.length && (
+              <p className="tiny">Reicht das Handy weiter, bis alle ihre Karte kennen.</p>
+            )}
           </div>
 
           {view.isGm && (
             <button
-              className="go block"
+              className="grad go block"
               disabled={busy}
               onClick={() => safeAct({ type: 'startDiscussion' })}
             >
-              Diskussion starten
+              {revealed === playing.length ? 'Diskussion starten' : `Trotzdem starten`}
             </button>
           )}
         </>
       )}
 
       {/* ---------------------------- DISCUSSION --------------------------- */}
-      {view.phase === 'discussion' && (
+      {view.phase === 'discussion' && !inQueue && (
         <>
           <div className="panel stack">
             <h2>Redet!</h2>
@@ -465,7 +584,7 @@ export default function RoomClient({ code }: { code: string }) {
 
           {view.isGm && (
             <button
-              className="go block"
+              className={view.deadline ? 'block' : 'grad go block'}
               disabled={busy}
               onClick={() => safeAct({ type: 'startVoting' })}
             >
@@ -476,7 +595,7 @@ export default function RoomClient({ code }: { code: string }) {
       )}
 
       {/* ------------------------------ VOTING ----------------------------- */}
-      {view.phase === 'voting' && (
+      {view.phase === 'voting' && !inQueue && (
         <>
           {view.mySeatIds.some((id) => !view.seats.find((s) => s.id === id)?.spectator) ? (
             <VotingFlow
@@ -545,13 +664,42 @@ export default function RoomClient({ code }: { code: string }) {
                   onChange={(v) => safeAct({ type: 'updateSettings', impostorCount: v })}
                 />
               </div>
-              <button
-                className="go block"
-                disabled={busy}
-                onClick={() => safeAct({ type: 'nextRound' })}
-              >
-                Nächste Runde
-              </button>
+              {view.targetReached ? (
+                <>
+                  <div className="note ok">Punkteziel erreicht.</div>
+                  <button
+                    className="grad go block"
+                    disabled={busy}
+                    onClick={() => safeAct({ type: 'endGame' })}
+                  >
+                    🏆 Siegerehrung
+                  </button>
+                  <button
+                    className="block"
+                    disabled={busy}
+                    onClick={() => safeAct({ type: 'nextRound' })}
+                  >
+                    Trotzdem weiterspielen
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="grad go block"
+                    disabled={busy}
+                    onClick={() => safeAct({ type: 'nextRound' })}
+                  >
+                    Nächste Runde
+                  </button>
+                  <button
+                    className="block"
+                    disabled={busy}
+                    onClick={() => safeAct({ type: 'endGame' })}
+                  >
+                    🏆 Spiel beenden
+                  </button>
+                </>
+              )}
               <button className="quiet block" onClick={() => safeAct({ type: 'backToLobby' })}>
                 Zurück zur Lobby
               </button>
@@ -559,6 +707,43 @@ export default function RoomClient({ code }: { code: string }) {
           )}
         </>
       )}
+
+      {/* ----------------------------- GAME OVER ---------------------------- */}
+      {view.phase === 'gameOver' && view.standings && (
+        <>
+          <div className="winner">
+            <span className="eyebrow">Endstand nach {view.roundNumber} Runden</span>
+            <div className="winner-name">{view.standings[0]?.seatName ?? '—'}</div>
+            <p className="muted" style={{ margin: 0 }}>
+              gewinnt mit {view.standings[0]?.score ?? 0} Punkten
+            </p>
+          </div>
+
+          <Podium standings={view.standings} />
+
+          {view.isGm && (
+            <>
+              <button
+                className="grad go block"
+                disabled={busy}
+                onClick={() => safeAct({ type: 'restartGame' })}
+              >
+                Neues Spiel
+              </button>
+              <p className="tiny center">Punkte werden auf null gesetzt, die Lobby bleibt.</p>
+            </>
+          )}
+        </>
+      )}
+
+      {/* Emotes work in every phase - clapping at the podium is half the fun. */}
+      {mySeats.length > 0 && (
+        <ReactionBar
+          onReact={(emoji) => safeAct({ type: 'react', seatId: mySeats[0].id, emoji })}
+        />
+      )}
+
+      <ReactionLayer reactions={view.reactions} />
 
       <div className="spacer" />
 
@@ -582,6 +767,7 @@ export default function RoomClient({ code }: { code: string }) {
             (await act({ type: 'addCustomTopic', json })) as unknown as {
               topicName: string;
               pairCount: number;
+              pending?: boolean;
             }
           }
           onRemove={async (topicId) => {
@@ -653,7 +839,8 @@ function SeatChips({
             <Avatar name={s.name} />
             <span className="nm">{s.name}</span>
             {s.isGmSeat && <span className="badge gm">GM</span>}
-            {!s.playNextRound && <span className="badge watch">👀</span>}
+            {s.waiting && <span className="badge watch">wartet</span>}
+            {!s.playNextRound && !s.waiting && <span className="badge watch">👀</span>}
             {view.isGm && editable && (
               <button
                 className="x"
@@ -709,7 +896,7 @@ function MenuSheet({
   return (
     <Sheet title={`Raum ${code}`} onClose={onClose}>
       <button className="block" onClick={onOpenTopics}>
-        + Eigenes Thema
+        {view.isGm ? '+ Eigenes Thema' : '+ Thema vorschlagen'}
       </button>
 
       {freeSeats.length > 0 && (
@@ -759,6 +946,21 @@ function MenuSheet({
               An {d.label}
             </button>
           ))}
+        </>
+      )}
+
+      {view.isGm && !['lobby', 'results'].includes(view.phase) && (
+        <>
+          <span className="eyebrow">Runde</span>
+          <button
+            className="danger block"
+            onClick={() => {
+              onAction({ type: 'backToLobby' });
+              onClose();
+            }}
+          >
+            Runde abbrechen
+          </button>
         </>
       )}
 

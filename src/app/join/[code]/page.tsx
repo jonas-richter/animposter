@@ -3,6 +3,7 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { joinRoom, loadName, loadToken, saveName, saveToken } from '@/lib/client';
+import { randomName } from '@/lib/names';
 
 export default function JoinPage() {
   const params = useParams<{ code: string }>();
@@ -13,6 +14,7 @@ export default function JoinPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(true);
+  const [hint] = useState(() => randomName());
 
   // Already have a session for this room? Walk straight back in.
   useEffect(() => {
@@ -80,14 +82,14 @@ export default function JoinPage() {
         <span className="eyebrow">Dein Name</span>
         <input
           type="text"
-          placeholder="z.B. Jonas"
+          placeholder={`z.B. ${hint}`}
           value={name}
           maxLength={24}
           autoComplete="off"
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
         />
-        <button className="primary block" onClick={submit} disabled={busy || !name.trim()}>
+        <button className="grad primary block" onClick={submit} disabled={busy || !name.trim()}>
           {busy ? 'Trete bei …' : 'Los geht’s'}
         </button>
       </div>

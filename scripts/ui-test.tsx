@@ -68,6 +68,7 @@ const { act } = require('react') as { act: (cb: () => Promise<void> | void) => P
 const { createRoot } = require('react-dom/client') as typeof import('react-dom/client');
 
 import RoomClient from '../src/components/RoomClient';
+import HostScreen from '../src/components/HostScreen';
 
 let passed = 0;
 let failed = 0;
@@ -105,6 +106,7 @@ interface Phone {
   click(label: string | RegExp): Promise<void>;
   /** Click a ballot row by player name (ignores status tags in the same row). */
   clickCandidate(name: string): Promise<boolean>;
+  /** Wait for at least one poll cycle (intervals are phase dependent). */
   settle(ms?: number): Promise<void>;
 }
 
@@ -173,8 +175,30 @@ async function mountPhone(name: string, code: string, token: string): Promise<Ph
       });
       return true;
     },
-    async settle(ms = 1200) {
+    async settle(ms = 3400) {
       activate();
+      await act(async () => {
+        await sleep(ms);
+      });
+    },
+  };
+}
+
+/** Mount the shared TV screen for a room. */
+async function mountHost(code: string) {
+  const container = dom.window.document.createElement('div');
+  dom.window.document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(React.createElement(HostScreen, { code }));
+  });
+  await act(async () => {
+    await sleep(1200);
+  });
+  return {
+    container,
+    text: () => container.textContent ?? '',
+    async settle(ms = 2600) {
       await act(async () => {
         await sleep(ms);
       });
@@ -189,6 +213,12 @@ async function main() {
   const create = await api('/api/room', { method: 'POST' });
   const code: string = create.data.code;
   const gmToken: string = create.data.token;
+  // The walkthrough steps through every phase by hand.
+  await api(`/api/room/${code}/action`, {
+    method: 'POST',
+    token: gmToken,
+    body: { type: 'updateSettings', timerEnabled: false },
+  });
   await api(`/api/room/${code}/join`, { method: 'POST', token: gmToken, body: { name: 'Jonas' } });
 
   const p2 = await api(`/api/room/${code}/join`, { method: 'POST', body: { name: 'Mira' } });
@@ -241,8 +271,22 @@ async function main() {
     narutoRow?.textContent ?? 'Zeile nicht gefunden',
   );
 
-  console.log('3) Rollen verteilen und aufdecken');
+  console.log('3) Themen-Gewinner, dann Rollen');
   await gm.click('Rollen verteilen');
+  await mira.settle();
+  check('Gewinner-Screen bei allen', mira.text().includes('Das Thema steht fest'), mira.text().slice(0, 200));
+  check('Gewinner ist Naruto', !!mira.container.querySelector('.winner-name'));
+  check(
+    'Gewinnername korrekt',
+    mira.container.querySelector('.winner-name')?.textContent === 'Naruto',
+    mira.container.querySelector('.winner-name')?.textContent ?? '',
+  );
+  check('Konfetti läuft', (mira.container.querySelectorAll('.confetti span').length ?? 0) > 20);
+  check('Balkendiagramm da', mira.container.querySelectorAll('.bar-row').length > 0);
+  check('Keine Karte während der Auflösung', !mira.container.querySelector('.rolecard'));
+  check('Nur der GM kann weiter', !mira.find('Rollen austeilen'));
+
+  await gm.click('Rollen austeilen');
   await mira.settle();
   await tom.settle();
 
@@ -262,10 +306,15 @@ async function main() {
   for (const phone of [gm, mira]) {
     await phone.click('Aufdecken');
     check(`${phone.name}: Charakter sichtbar`, phone.text().includes('Dein Charakter'), phone.text().slice(0, 200));
+    const status = phone.container.querySelector('.role-status')?.textContent?.trim() ?? '';
     check(
       `${phone.name}: Impostor-Status angezeigt`,
-      /Du bist Impostor|Du bist echt/.test(phone.text()),
-      phone.text().slice(0, 200),
+      status === 'Impostor' || status === 'Kein Impostor',
+      status,
+    );
+    check(
+      `${phone.name}: Status ohne Farbsignal`,
+      !phone.container.querySelector('.verdict'),
     );
   }
 
@@ -287,10 +336,21 @@ async function main() {
   check('Tom+Lena: zweite Karte startet verdeckt', tom.text().includes('Aufdecken'));
   await tom.click('Aufdecken');
   await tom.click('Gesehen – alle fertig');
-  check('Tom+Lena: Sequenz beendet', tom.text().includes('Alle haben geschaut'), tom.text().slice(0, 200));
+  check(
+    'Tom+Lena: Sequenz beendet, keine Karte mehr',
+    !tom.container.querySelector('.rolecard'),
+    tom.text().slice(0, 200),
+  );
+  check('Tom+Lena: Roster statt Extra-Panel', !!tom.container.querySelector('.roster'));
 
   await gm.settle();
   check('GM-Fortschritt 4/4', gm.text().includes('4/4'), gm.text().slice(0, 400));
+  check(
+    'Alle im Roster als fertig markiert',
+    gm.container.querySelectorAll('.chip-player.ready').length === 4,
+    String(gm.container.querySelectorAll('.chip-player.ready').length),
+  );
+  check('Roster meldet Vollzähligkeit', gm.text().includes('Alle haben ihre Karte'), gm.text().slice(0, 300));
 
   console.log('4) Diskussion und Abstimmung');
   await gm.click('Diskussion starten');
@@ -333,11 +393,11 @@ async function main() {
   await tom.click(/Ich bin .* – abstimmen/);
   for (const t of ['Jonas', 'Mira']) await tom.clickCandidate(t);
   await tom.click('Abstimmen (');
-  await tom.settle(1500);
+  await tom.settle();
 
   console.log('5) Auflösung');
-  await gm.settle(1500);
-  await mira.settle(1500);
+  await gm.settle();
+  await mira.settle();
   check('Auflösung erscheint automatisch', gm.text().includes('Die Impostor waren'), gm.text().slice(0, 300));
   check('Gemeinsamkeiten sichtbar', gm.text().includes('Gemeinsamkeiten'));
   check('Stolpersteine sichtbar', gm.text().includes('Stolpersteine'));
@@ -374,9 +434,11 @@ async function main() {
   await mira.clickCandidate('Attack on Titan');
   await gm.settle();
   await gm.click('Rollen verteilen');
+  await gm.settle();
+  await gm.click('Rollen austeilen');
   await mira.settle();
   await mira.click('Aufdecken');
-  check('Runde 2: Karte da', mira.text().includes('Dein Charakter'));
+  check('Runde 2: Karte aufgedeckt', !!mira.container.querySelector('.rolecard.shown'));
   check(
     'Impostor-Wissen aus: kein Impostor-Hinweis',
     !/Du bist ein IMPOSTOR|Du bist kein Impostor/.test(mira.text()),
@@ -401,6 +463,11 @@ async function main() {
   console.log('8) Ein Gerät für alle (Handy herumreichen)');
   const single = await api('/api/room', { method: 'POST' });
   const sCode: string = single.data.code;
+  await api(`/api/room/${sCode}/action`, {
+    method: 'POST',
+    token: single.data.token,
+    body: { type: 'updateSettings', timerEnabled: false },
+  });
   const solo = await mountPhone('Ein Handy', sCode, single.data.token);
   check('Lobby zeigt QR und Code', !!solo.container.querySelector('.qr') && solo.text().includes(sCode));
 
@@ -425,15 +492,22 @@ async function main() {
   await solo.click('Los geht');
   await solo.clickCandidate('Harry Potter');
   await solo.click('Rollen verteilen');
+  check('Ein Gerät: Gewinner-Screen', solo.text().includes('Harry Potter'), solo.text().slice(0, 200));
+  await solo.click('Rollen austeilen');
   check('Übergabe-Screen zuerst', solo.text().includes('Handy weitergeben an'), solo.text().slice(0, 250));
   for (let i = 0; i < 4; i++) {
     await solo.click(/Ich bin .* – Karte zeigen/);
     check(`Karte ${i + 1} verdeckt`, !solo.container.querySelector('.rolecard.shown'));
     await solo.click('Aufdecken');
-    check(`Karte ${i + 1} sichtbar`, solo.text().includes('Dein Charakter'));
+    check(`Karte ${i + 1} sichtbar`, !!solo.container.querySelector('.rolecard.shown'));
     await solo.click(i < 3 ? 'Gesehen – weitergeben' : 'Gesehen – alle fertig');
   }
-  check('Alle durch', solo.text().includes('Alle haben geschaut'), solo.text().slice(0, 200));
+  await solo.settle();
+  check(
+    'Alle durch',
+    solo.container.querySelectorAll('.chip-player.ready').length === 4,
+    solo.text().slice(0, 200),
+  );
 
   await solo.click('Diskussion starten');
   await solo.click('Abstimmung starten');
@@ -447,10 +521,76 @@ async function main() {
     }
     check(`Stimme ${i + 1} hat 2 Ziele`, picked === 2, String(picked));
     await solo.click('Abstimmen (');
-    await solo.settle(400);
+    await solo.settle(1500);
   }
-  await solo.settle(1500);
+  await solo.settle();
   check('Auflösung', solo.text().includes('Die Impostor waren'), solo.text().slice(0, 250));
+
+  console.log('9) Host-Screen (TV)');
+  const hostRoom = await api('/api/room', { method: 'POST' });
+  const hCode: string = hostRoom.data.code;
+  const hGm = hostRoom.data.token;
+  await api(`/api/room/${hCode}/action`, {
+    method: 'POST',
+    token: hGm,
+    body: { type: 'updateSettings', timerEnabled: false },
+  });
+  await api(`/api/room/${hCode}/join`, { method: 'POST', token: hGm, body: { name: 'Host' } });
+  const hTokens = [hGm];
+  for (const n of ['Ida', 'Jan', 'Kim']) {
+    const r = await api(`/api/room/${hCode}/join`, { method: 'POST', body: { name: n } });
+    hTokens.push(r.data.token);
+  }
+
+  const tv = await mountHost(hCode);
+  check('TV zeigt den Raumcode', tv.text().includes(hCode), tv.text().slice(0, 160));
+  check('TV zeigt den QR-Code', !!tv.container.querySelector('.host-qr'));
+  check(
+    'TV listet alle Spieler',
+    ['Host', 'Ida', 'Jan', 'Kim'].every((n) => tv.text().includes(n)),
+    tv.text().slice(0, 240),
+  );
+
+  await api(`/api/room/${hCode}/action`, { method: 'POST', token: hGm, body: { type: 'startTopicVote' } });
+  await tv.settle();
+  check('TV zeigt die Themenwahl', tv.text().includes('Welches Universum'), tv.text().slice(0, 200));
+
+  await api(`/api/room/${hCode}/action`, {
+    method: 'POST',
+    token: hGm,
+    body: { type: 'startRound', topicId: 'marvel' },
+  });
+  await tv.settle();
+  check('TV zeigt den Themen-Gewinner', tv.text().includes('Marvel'), tv.text().slice(0, 200));
+  check('TV feiert mit Konfetti', tv.container.querySelectorAll('.confetti span').length > 20);
+
+  await api(`/api/room/${hCode}/action`, { method: 'POST', token: hGm, body: { type: 'startReveal' } });
+  await tv.settle();
+  check('TV zeigt die Kartenphase', tv.text().includes('Karten anschauen'), tv.text().slice(0, 200));
+  check(
+    'TV verrät keine Charaktere',
+    !tv.container.querySelector('.rolecard') && !/Dein Charakter/.test(tv.text()),
+  );
+
+  await api(`/api/room/${hCode}/action`, { method: 'POST', token: hGm, body: { type: 'startDiscussion' } });
+  await api(`/api/room/${hCode}/action`, { method: 'POST', token: hGm, body: { type: 'startVoting' } });
+  await tv.settle();
+  check('TV zeigt die Abstimmung', tv.text().includes('Wer ist Impostor'), tv.text().slice(0, 200));
+
+  await api(`/api/room/${hCode}/action`, { method: 'POST', token: hGm, body: { type: 'finishRound' } });
+  await tv.settle();
+  check('TV zeigt die Auflösung', tv.text().includes('Die Impostor waren'), tv.text().slice(0, 240));
+  check('TV zeigt beide Charaktere', !!tv.container.querySelector('.host-versus'));
+
+  await api(`/api/room/${hCode}/action`, { method: 'POST', token: hGm, body: { type: 'endGame' } });
+  await tv.settle();
+  check('TV zeigt das Podium', !!tv.container.querySelector('.podium'), tv.text().slice(0, 200));
+
+  console.log('10) Reaktionen');
+  const reactPhone = await mountPhone('Reagierer', hCode, hGm);
+  await reactPhone.settle();
+  const reactBtn = reactPhone.container.querySelector('.react-btn') as HTMLElement | null;
+  check('Emote-Leiste vorhanden', !!reactBtn, reactPhone.text().slice(0, 200));
 
   console.log(`\n${passed} bestanden, ${failed} fehlgeschlagen\n`);
   process.exit(failed === 0 ? 0 : 1);

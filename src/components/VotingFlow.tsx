@@ -72,7 +72,7 @@ export default function VotingFlow({
             </p>
           </div>
         </div>
-        <button className="primary block" onClick={() => setStage('ballot')}>
+        <button className="grad primary block" onClick={() => setStage('ballot')}>
           Ich bin {seat.name} – abstimmen
         </button>
       </div>
@@ -139,7 +139,7 @@ export default function VotingFlow({
       </div>
 
       <button
-        className="go block"
+        className="grad go block"
         onClick={submit}
         disabled={busy || selected.length !== impostorCount}
       >

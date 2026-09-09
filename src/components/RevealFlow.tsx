@@ -32,17 +32,9 @@ export default function RevealFlow({
   if (roles.length === 0) return null;
   const role = roles[Math.min(index, roles.length - 1)];
 
-  if (stage === 'finished') {
-    return (
-      <div className="panel stack center">
-        <div style={{ fontSize: 44 }}>✅</div>
-        <h2>Alle haben geschaut</h2>
-        <p className="muted" style={{ margin: 0 }}>
-          {roles.map((r) => r.seatName).join(', ')}
-        </p>
-      </div>
-    );
-  }
+  // Once this device is through, the shared roster below is the status display -
+  // no second "done" panel on top of it.
+  if (stage === 'finished') return null;
 
   if (stage === 'handoff') {
     return (
@@ -57,7 +49,7 @@ export default function RevealFlow({
             </p>
           </div>
         </div>
-        <button className="primary block" onClick={() => setStage('card')}>
+        <button className="grad primary block" onClick={() => setStage('card')}>
           Ich bin {role.seatName} – Karte zeigen
         </button>
       </div>
@@ -81,7 +73,7 @@ export default function RevealFlow({
       />
       {multi ? (
         <button
-          className="primary block"
+          className="grad primary block"
           onClick={() => {
             if (index + 1 < roles.length) {
               setIndex(index + 1);

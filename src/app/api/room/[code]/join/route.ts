@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { addDevice, addSeat, cleanName, deviceByToken, GameError } from '@/lib/game';
+import { addDevice, addSeat, cleanName, deviceByToken, roundInProgress } from '@/lib/game';
 import { withRoom } from '@/lib/store';
 import { handleError, noStore, normalizeCode, readJson, TOKEN_HEADER } from '@/lib/http';
 import { buildView } from '@/lib/view';
@@ -24,19 +24,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
         known.lastSeen = Date.now();
         if (typeof body.name === 'string' && body.name.trim()) {
           const owned = room.seats.filter((s) => s.deviceId === known.id);
-          if (owned.length === 0) addSeat(room, known.id, body.name);
+          if (owned.length === 0) addSeat(room, known.id, body.name, roundInProgress(room));
         }
         return { token: known.token, deviceId: known.id };
       }
 
-      if (room.phase !== 'lobby' && room.phase !== 'topicVote' && room.phase !== 'results') {
-        throw new GameError('Die Runde läuft gerade. Bitte kurz warten und dann beitreten.');
-      }
+      // Latecomers are always let in; they simply sit the running round out.
+      const waiting = roundInProgress(room);
 
       const device = addDevice(room);
       if (typeof body.name === 'string' && body.name.trim()) {
         try {
-          addSeat(room, device.id, cleanName(body.name));
+          addSeat(room, device.id, cleanName(body.name), waiting);
         } catch (e) {
           // roll the new device back so a duplicate name does not leave a ghost
           room.devices = room.devices.filter((d) => d.id !== device.id);

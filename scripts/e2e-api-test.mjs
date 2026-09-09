@@ -54,6 +54,9 @@ async function main() {
 
   // ---- join ---------------------------------------------------------------
   console.log('2) Spieler beitreten');
+  // These flows step through every phase by hand, so the countdown is off.
+  await act(code, gm, { type: 'updateSettings', timerEnabled: false });
+
   const gmJoin = await api(`/api/room/${code}/join`, {
     method: 'POST',
     token: gm,
@@ -182,8 +185,21 @@ async function main() {
   check('HTML im Namen wird als Text gespeichert', xss.status === 200, xss.text.slice(0, 120));
 
   // ---- start round --------------------------------------------------------
-  console.log('5) Runde starten');
-  const started = await act(code, gm, { type: 'startRound', topicId: naruto.id });
+  console.log('5) Themen-Gewinner und Rundenstart');
+  const announced = await act(code, gm, { type: 'startRound', topicId: naruto.id });
+  check('Erst die Themen-Auflösung', announced.data?.view?.phase === 'topicReveal', announced.text.slice(0, 200));
+  check('Gewinner-Thema im Payload', announced.data?.view?.topicReveal?.name === 'Naruto');
+  check('Abstimmung im Payload', (announced.data?.view?.topicReveal?.tally?.length ?? 0) > 0);
+  check(
+    'Noch keine Rollen während der Auflösung',
+    announced.data?.view?.myRoles?.length === 0,
+    JSON.stringify(announced.data?.view?.myRoles),
+  );
+
+  const notGmReveal = await act(code, players[0].token, { type: 'startReveal' });
+  check('Nur der GM teilt die Rollen aus', notGmReveal.status === 400, notGmReveal.text.slice(0, 120));
+
+  const started = await act(code, gm, { type: 'startReveal' });
   check('Runde gestartet', started.data?.view?.phase === 'reveal', started.text.slice(0, 200));
 
   const gmView = started.data.view;
@@ -308,7 +324,8 @@ async function main() {
     nr.data.view.seats.find((s) => s.id === mySeatId)?.spectator === true,
   );
 
-  const r2 = await act(code, gm, { type: 'startRound', topicId: naruto.id });
+  await act(code, gm, { type: 'startRound', topicId: naruto.id });
+  const r2 = await act(code, gm, { type: 'startReveal' });
   check('Runde 2 gestartet', r2.data?.view?.phase === 'reveal', r2.text.slice(0, 200));
   const specView = (await api(`/api/room/${code}/state`, { token: specToken })).data.view;
   check('Zuschauer hat keine Rolle', specView.myRoles.length === 0);
@@ -358,10 +375,205 @@ async function main() {
   });
   check('Weiteres Gerät kann jederzeit dazu', lateJoin.status === 200, lateJoin.text.slice(0, 120));
 
+  await act(sCode, sTok, { type: 'updateSettings', timerEnabled: false });
   await act(sCode, sTok, { type: 'startTopicVote' });
-  const sRound = await act(sCode, sTok, { type: 'startRound', topicId: 'onepiece' });
+  await act(sCode, sTok, { type: 'startRound', topicId: 'onepiece' });
+  const sRound = await act(sCode, sTok, { type: 'startReveal' });
   check('Runde gestartet', sRound.data?.view?.phase === 'reveal', sRound.text.slice(0, 200));
   check('Ein Gerät hält 4 Rollen', sRound.data?.view?.myRoles?.length === 4);
+
+  // ---- late join queue -----------------------------------------------------
+  console.log('10b) Warteschlange für Nachzügler');
+  const lateRoom = await api('/api/room', { method: 'POST' });
+  const lCode = lateRoom.data.code;
+  const lGm = lateRoom.data.token;
+  await api(`/api/room/${lCode}/join`, { method: 'POST', token: lGm, body: { name: 'Host' } });
+  const lPlayers = [];
+  for (const n of ['Eins', 'Zwei', 'Drei']) {
+    const r = await api(`/api/room/${lCode}/join`, { method: 'POST', body: { name: n } });
+    lPlayers.push(r.data.token);
+  }
+  await act(lCode, lGm, { type: 'updateSettings', timerEnabled: false });
+  await act(lCode, lGm, { type: 'startTopicVote' });
+  await act(lCode, lGm, { type: 'startRound', topicId: 'deathnote' });
+  await act(lCode, lGm, { type: 'startReveal' });
+
+  const late = await api(`/api/room/${lCode}/join`, { method: 'POST', body: { name: 'Nachzügler' } });
+  check('Beitritt während der Runde klappt', late.status === 200, late.text.slice(0, 160));
+  const lv = late.data.view;
+  check('Nachzügler wartet', lv.seats.find((s) => s.name === 'Nachzügler')?.waiting === true);
+  check('Nachzügler bekommt keine Rolle', lv.myRoles.length === 0);
+  check('Nachzügler sieht KEINE Auflösung', lv.results === undefined);
+  check('Nachzügler ist kein Vollzuschauer', lv.spectating === false);
+  check('Warteschlange gezählt', lv.waitingCount === 1, String(lv.waitingCount));
+  check(
+    'Rollen anderer nicht im Payload',
+    !JSON.stringify(lv).includes('impostorSeatIds'),
+  );
+
+  const lateVote = await act(lCode, late.data.token, {
+    type: 'castVote',
+    seatId: lv.mySeatIds[0],
+    targets: [lv.seats[0].id, lv.seats[1].id],
+  });
+  check('Nachzügler darf nicht abstimmen', lateVote.status === 400, lateVote.text.slice(0, 120));
+
+  await act(lCode, lGm, { type: 'startDiscussion' });
+  await act(lCode, lGm, { type: 'startVoting' });
+  await act(lCode, lGm, { type: 'finishRound' });
+  const afterNext = await act(lCode, lGm, { type: 'nextRound' });
+  check(
+    'Nach der Runde ist der Nachzügler dabei',
+    afterNext.data.view.seats.find((s) => s.name === 'Nachzügler')?.waiting === false,
+  );
+  check('Keine Warteschlange mehr', afterNext.data.view.waitingCount === 0);
+
+  // ---- topic suggestions ---------------------------------------------------
+  console.log('10c) Themenvorschläge');
+  const goodJson = (name) =>
+    JSON.stringify({
+      name,
+      pairs: Array.from({ length: 3 }, (_, i) => ({
+        real: { name: `${name} A${i}` },
+        impostor: { name: `${name} B${i}` },
+        similarities: ['x', 'y', 'z'],
+        traps: ['t'],
+      })),
+    });
+
+  const prop = await act(lCode, lPlayers[0], { type: 'addCustomTopic', json: goodJson('Vorschlag Eins') });
+  check('Spieler darf vorschlagen', prop.status === 200, prop.text.slice(0, 160));
+  check('Vorschlag nicht als ausstehend markiert', prop.data.pending !== true);
+  const propView = (await api(`/api/room/${lCode}/state`, { token: lPlayers[1] })).data.view;
+  const proposed = propView.topics.find((t) => t.name === 'Vorschlag Eins');
+  check('Für alle sichtbar', !!proposed);
+  check('Zeigt den Vorschlagenden', proposed?.proposedBy === 'Eins', proposed?.proposedBy ?? '');
+
+  const notMine = await act(lCode, lPlayers[1], { type: 'removeCustomTopic', topicId: proposed.id });
+  check('Nur der GM darf löschen', notMine.status === 400, notMine.text.slice(0, 120));
+  const removed = await act(lCode, lGm, { type: 'removeCustomTopic', topicId: proposed.id });
+  check('GM löscht Quatsch', removed.status === 200);
+
+  await act(lCode, lGm, { type: 'updateSettings', proposalsNeedApproval: true });
+  const prop2 = await act(lCode, lPlayers[0], { type: 'addCustomTopic', json: goodJson('Vorschlag Zwei') });
+  check('Mit Freigabepflicht: ausstehend', prop2.data.pending === true, prop2.text.slice(0, 160));
+  const otherView = (await api(`/api/room/${lCode}/state`, { token: lPlayers[1] })).data.view;
+  check(
+    'Ausstehender Vorschlag für andere unsichtbar',
+    !otherView.topics.some((t) => t.name === 'Vorschlag Zwei'),
+  );
+  const gmView2 = (await api(`/api/room/${lCode}/state`, { token: lGm })).data.view;
+  const pending = gmView2.topics.find((t) => t.name === 'Vorschlag Zwei');
+  check('GM sieht ihn mit Markierung', pending?.pending === true);
+  await act(lCode, lGm, { type: 'approveCustomTopic', topicId: pending.id });
+  const afterApprove = (await api(`/api/room/${lCode}/state`, { token: lPlayers[1] })).data.view;
+  check(
+    'Nach Freigabe für alle sichtbar',
+    afterApprove.topics.some((t) => t.name === 'Vorschlag Zwei'),
+  );
+
+  // ---- automatic progression, emotes, podium -------------------------------
+  console.log('10d) Automatik, Reaktionen, Siegerehrung');
+  const autoRoom = await api('/api/room', { method: 'POST' });
+  const aCode = autoRoom.data.code;
+  const aGm = autoRoom.data.token;
+  await api(`/api/room/${aCode}/join`, { method: 'POST', token: aGm, body: { name: 'A' } });
+  const aTokens = [aGm];
+  for (const n of ['B', 'C', 'D']) {
+    const r = await api(`/api/room/${aCode}/join`, { method: 'POST', body: { name: n } });
+    aTokens.push(r.data.token);
+  }
+
+  // Short timers so the test does not sit around for two minutes.
+  const cfg = await act(aCode, aGm, {
+    type: 'updateSettings',
+    timerEnabled: true,
+    discussionSec: 15,
+    votingSec: 15,
+  });
+  check('Timer-Einstellungen gespeichert', cfg.data?.view?.settings?.discussionSec === 15, cfg.text.slice(0, 140));
+  const badTimer = await act(aCode, aGm, { type: 'updateSettings', discussionSec: 5 });
+  check('Unsinnige Timerwerte abgelehnt', badTimer.status === 400, badTimer.text.slice(0, 120));
+
+  await act(aCode, aGm, { type: 'startTopicVote' });
+  // Everyone votes -> the round starts on its own, no game master needed.
+  for (const t of aTokens) {
+    const st = await api(`/api/room/${aCode}/state`, { token: t });
+    for (const seatId of st.data.view.mySeatIds) {
+      await act(aCode, t, { type: 'voteTopic', seatId, topicId: 'harrypotter' });
+    }
+  }
+  const afterVotes = await api(`/api/room/${aCode}/state`, { token: aGm });
+  check('Deadline nach der letzten Themenstimme gesetzt', typeof afterVotes.data.view.deadline === 'number');
+  await new Promise((r) => setTimeout(r, 3200));
+  const auto1 = await api(`/api/room/${aCode}/state`, { token: aGm });
+  check(
+    'Runde startet automatisch',
+    auto1.data.view.phase === 'topicReveal',
+    auto1.data.view.phase,
+  );
+
+  // reactions
+  const seatA = auto1.data.view.mySeatIds[0];
+  const react = await act(aCode, aGm, { type: 'react', seatId: seatA, emoji: '👏' });
+  check('Reaktion angenommen', react.status === 200, react.text.slice(0, 120));
+  check('Reaktion im Payload', react.data.view.reactions.length === 1);
+  const spam = await act(aCode, aGm, { type: 'react', seatId: seatA, emoji: '😂' });
+  check('Reaktions-Spam wird gebremst', spam.status === 400, spam.text.slice(0, 120));
+  const badEmoji = await act(aCode, aTokens[1], {
+    type: 'react',
+    seatId: (await api(`/api/room/${aCode}/state`, { token: aTokens[1] })).data.view.mySeatIds[0],
+    emoji: '💣',
+  });
+  check('Fremde Emojis abgelehnt', badEmoji.status === 400, badEmoji.text.slice(0, 120));
+
+  // topicReveal -> reveal happens on its own
+  await new Promise((r) => setTimeout(r, 7500));
+  const auto2 = await api(`/api/room/${aCode}/state`, { token: aGm });
+  check('Themen-Auflösung endet automatisch', auto2.data.view.phase === 'reveal', auto2.data.view.phase);
+  check('Jetzt gibt es Rollen', auto2.data.view.myRoles.length === 1);
+
+  for (const t of aTokens) {
+    const st = await api(`/api/room/${aCode}/state`, { token: t });
+    for (const r of st.data.view.myRoles) await act(aCode, t, { type: 'revealCard', seatId: r.seatId });
+  }
+  await new Promise((r) => setTimeout(r, 3200));
+  const auto3 = await api(`/api/room/${aCode}/state`, { token: aGm });
+  check(
+    'Nach allen Karten geht es automatisch weiter',
+    auto3.data.view.phase === 'discussion',
+    auto3.data.view.phase,
+  );
+  check('Diskussion hat eine Deadline', typeof auto3.data.view.deadline === 'number');
+
+  // host screen must never carry roles mid-round
+  const host = await api(`/api/room/${aCode}/host`);
+  check('Host-Ansicht erreichbar ohne Token', host.status === 200);
+  check('Host zeigt die Phase', host.data.view.phase === 'discussion');
+  check(
+    'Host-Ansicht enthält KEINE Rollen',
+    !JSON.stringify(host.data.view).includes('characterName') &&
+      !JSON.stringify(host.data.view).includes('impostorSeatIds'),
+  );
+  check('Host kennt alle Spieler', host.data.view.seats.length === 4);
+
+  await act(aCode, aGm, { type: 'startVoting' });
+  await act(aCode, aGm, { type: 'finishRound' });
+  const hostResults = await api(`/api/room/${aCode}/host`);
+  check('Host zeigt die Auflösung', !!hostResults.data.view.results);
+
+  const over = await act(aCode, aGm, { type: 'endGame' });
+  check('Spiel beendet', over.data.view.phase === 'gameOver');
+  check('Endstand vorhanden', over.data.view.standings.length === 4);
+  const hostOver = await api(`/api/room/${aCode}/host`);
+  check('Host zeigt das Podium', hostOver.data.view.standings.length === 4);
+
+  const restart = await act(aCode, aGm, { type: 'restartGame' });
+  check('Neues Spiel: zurück in die Lobby', restart.data.view.phase === 'lobby');
+  check(
+    'Punkte zurückgesetzt',
+    restart.data.view.seats.every((s) => s.score === 0),
+  );
 
   // ---- health -------------------------------------------------------------
   const health = await api('/api/health');

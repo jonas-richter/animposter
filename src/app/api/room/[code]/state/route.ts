@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { deviceByToken } from '@/lib/game';
-import { getRoom, putRoom } from '@/lib/store';
+import { putRoom } from '@/lib/store';
+import { readRoomAndAdvance } from '@/lib/tick';
 import { handleError, jsonError, noStore, normalizeCode, TOKEN_HEADER } from '@/lib/http';
 import { buildView } from '@/lib/view';
 
@@ -15,15 +16,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
     const code = normalizeCode(rawCode);
     const token = req.headers.get(TOKEN_HEADER);
 
-    const room = await getRoom(code);
+    // Also applies any phase transition that has come due.
+    const room = await readRoomAndAdvance(code);
     if (!room) return jsonError('Raum nicht gefunden.', 404);
 
     const device = deviceByToken(room, token);
     if (!device) return jsonError('Nicht in diesem Raum angemeldet.', 401);
 
-    // Heartbeat: only write when the timestamp is actually stale, so polling
-    // does not hammer the store.
-    if (Date.now() - device.lastSeen > 5000) {
+    // Heartbeat: only write when the timestamp is really stale. Every write is
+    // a Redis command, and "online" only drives a dot in the player list.
+    if (Date.now() - device.lastSeen > 45000) {
       device.lastSeen = Date.now();
       await putRoom(room);
     }

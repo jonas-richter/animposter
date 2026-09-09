@@ -9,10 +9,12 @@
 export type Phase =
   | 'lobby' // players gather / seats are created
   | 'topicVote' // everyone votes for a topic
+  | 'topicReveal' // the winning topic is announced (confetti moment)
   | 'reveal' // role cards are handed out, tap to reveal
   | 'discussion' // talking
   | 'voting' // everyone votes for the suspected impostors
-  | 'results'; // resolution + scores
+  | 'results' // resolution + scores
+  | 'gameOver'; // final standings, podium
 
 export interface Device {
   id: string;
@@ -28,6 +30,12 @@ export interface Seat {
   deviceId: string | null;
   /** Spectator for the CURRENT round (set when the round starts). */
   spectator: boolean;
+  /**
+   * Joined while a round was already running. Sits out this round like a
+   * spectator, but must NOT see any roles - a spectator chose to see
+   * everything, a newcomer would just be handed the solution.
+   */
+  waiting: boolean;
   /** Toggle: take part in the NEXT round? */
   playNextRound: boolean;
   score: number;
@@ -68,6 +76,10 @@ export interface Round {
   impostorCount: number;
   /** Seats that actively played this round. */
   activeSeatIds: string[];
+  /** Snapshot of the topic vote, for the announcement screen. */
+  topicTally: { name: string; votes: number }[];
+  /** True when the game master picked a topic instead of taking the winner. */
+  topicOverridden: boolean;
   /** Points earned in this round, seatId -> points. Filled at results time. */
   points: Record<string, number>;
 }
@@ -77,6 +89,22 @@ export interface Settings {
   impostorsKnow: boolean;
   /** How many impostors per round (also = number of votes each player casts). */
   impostorCount: number;
+  /** When on, player suggestions are hidden until the game master waves them through. */
+  proposalsNeedApproval: boolean;
+  /** Run discussion and voting on a countdown so nobody has to play referee. */
+  timerEnabled: boolean;
+  discussionSec: number;
+  votingSec: number;
+  /** First player to reach this ends the game. null = play until someone stops. */
+  targetScore: number | null;
+}
+
+/** A short-lived emote floating across everyone's screen. */
+export interface Reaction {
+  id: string;
+  seatName: string;
+  emoji: string;
+  at: number;
 }
 
 export interface CharacterPair {
@@ -91,6 +119,10 @@ export interface Topic {
   id: string;
   name: string;
   custom?: boolean;
+  /** Name of the player who suggested it (empty when the GM added it). */
+  proposedBy?: string;
+  /** Only relevant while "Vorschläge erst freigeben" is on. */
+  approved?: boolean;
   pairs: CharacterPair[];
 }
 
@@ -114,6 +146,16 @@ export interface Room {
   customTopics: Topic[];
   /** Pair ids already used in this room, to avoid repeats. */
   usedPairIds: string[];
+  /**
+   * When the current phase runs out on its own. Serverless has no background
+   * jobs, so the transition is applied by whichever request notices first.
+   */
+  deadline: number | null;
+  deadlineAction: 'startRound' | 'reveal' | 'discussion' | 'voting' | 'finish' | null;
+  /** Recent emotes; pruned on every write. */
+  reactions: Reaction[];
+  /** seatId -> timestamp, for the emote cooldown. */
+  lastReactionAt: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +170,7 @@ export interface SeatPublic {
   online: boolean;
   mine: boolean;
   spectator: boolean;
+  waiting: boolean;
   playNextRound: boolean;
   score: number;
   isGmSeat: boolean;
@@ -177,6 +220,10 @@ export interface TopicMeta {
   pairCount: number;
   custom: boolean;
   votes: number;
+  /** Suggested by this player and not yet played. */
+  proposedBy?: string;
+  /** Waiting for the game master to approve it. */
+  pending: boolean;
 }
 
 export interface RoomView {
@@ -199,10 +246,26 @@ export interface RoomView {
   myVotes: Record<string, string[]>;
   /** Settings are only sent to the GM (and spectators) so the gear menu stays discreet. */
   settings?: Settings;
+  /** Winning-topic announcement, only during the topicReveal phase. */
+  topicReveal?: {
+    name: string;
+    tally: { name: string; votes: number }[];
+    overridden: boolean;
+  };
   /** Full information: spectators during the round, everybody at results time. */
   results?: RoundResults;
   /** True when the viewer is a pure spectator device seeing everything. */
   spectating: boolean;
   activeCount: number;
   spectatorCount: number;
+  /** Players who joined mid-round and are in from the next one. */
+  waitingCount: number;
+  /** Epoch ms when the phase advances by itself, or null. */
+  deadline: number | null;
+  /** Emotes from the last few seconds. */
+  reactions: Reaction[];
+  /** Final standings, only in the gameOver phase. */
+  standings?: { seatId: string; seatName: string; score: number }[];
+  /** Somebody hit the target score - the results screen offers the podium. */
+  targetReached: boolean;
 }
