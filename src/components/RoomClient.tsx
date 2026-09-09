@@ -17,15 +17,18 @@ import VotingFlow from './VotingFlow';
 import Results from './Results';
 import GearSheet from './GearSheet';
 import CustomTopicSheet from './CustomTopicSheet';
-import { Sheet, Toggle } from './ui';
+import { Avatar, Sheet, Stepper } from './ui';
 
 const POLL_MS = 800;
+/** A room has to be missing this many polls in a row before we give up. */
+const MISS_LIMIT = 6;
 
 export default function RoomClient({ code }: { code: string }) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [view, setView] = useState<RoomView | null>(null);
   const [fatal, setFatal] = useState('');
+  const [reconnecting, setReconnecting] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -33,16 +36,17 @@ export default function RoomClient({ code }: { code: string }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [topicSheetOpen, setTopicSheetOpen] = useState(false);
   const [peekOpen, setPeekOpen] = useState(false);
-  const [newSeatName, setNewSeatName] = useState('');
+  const [newSeatName, setNewSeatName] = useState(() =>
+    typeof window === 'undefined' ? '' : loadName(),
+  );
   const [overrideTopic, setOverrideTopic] = useState('');
   const [copied, setCopied] = useState(false);
 
   const polling = useRef(false);
   const bootstrapped = useRef(false);
+  const misses = useRef(0);
 
-  // --- session bootstrap ----------------------------------------------------
-  // Runs exactly once per room: read the device token and re-attach. Guarded by
-  // a ref so a re-render can never restart the handshake with a stale token.
+  // --- session bootstrap (once per room) -----------------------------------
   useEffect(() => {
     if (bootstrapped.current) return;
     bootstrapped.current = true;
@@ -52,19 +56,33 @@ export default function RoomClient({ code }: { code: string }) {
       return;
     }
     setToken(t);
-    joinRoom(code, null, t)
-      .then((res) => {
-        saveToken(code, res.token);
-        setView(res.view);
-      })
-      .catch((e) => {
-        clearToken(code);
-        setFatal(e instanceof Error ? e.message : 'Verbindung fehlgeschlagen.');
-      });
+
+    // Retry a few times: right after a room is created the very next request
+    // can land on a cold instance, and mobile networks drop requests.
+    (async () => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const res = await joinRoom(code, null, t);
+          saveToken(code, res.token);
+          setView(res.view);
+          return;
+        } catch (e) {
+          if (attempt === 3) {
+            setFatal(e instanceof Error ? e.message : 'Verbindung fehlgeschlagen.');
+            return;
+          }
+          setReconnecting(true);
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        }
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
   // --- polling --------------------------------------------------------------
+  // A single failed poll is not fatal: mobile networks drop requests, and a
+  // serverless backend can answer from a cold instance. Only give up after
+  // several misses in a row, and show a "reconnecting" hint meanwhile.
   useEffect(() => {
     if (!token) return;
     let stopped = false;
@@ -74,11 +92,20 @@ export default function RoomClient({ code }: { code: string }) {
       polling.current = true;
       try {
         const res = await fetchState(code, token!);
-        if (!stopped) setView(res.view);
+        if (stopped) return;
+        misses.current = 0;
+        setReconnecting(false);
+        setView(res.view);
       } catch (e) {
-        if (!stopped && e instanceof Error && /nicht gefunden|angemeldet/i.test(e.message)) {
-          setFatal(e.message);
-          stopped = true;
+        if (stopped) return;
+        const msg = e instanceof Error ? e.message : '';
+        if (/nicht gefunden|angemeldet/i.test(msg)) {
+          misses.current += 1;
+          setReconnecting(true);
+          if (misses.current >= MISS_LIMIT) {
+            setFatal(msg || 'Verbindung verloren.');
+            stopped = true;
+          }
         }
       } finally {
         polling.current = false;
@@ -106,8 +133,7 @@ export default function RoomClient({ code }: { code: string }) {
         if (res.view) setView(res.view);
         return res;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Fehler.';
-        setError(msg);
+        setError(e instanceof Error ? e.message : 'Fehler.');
         throw e;
       } finally {
         setBusy(false);
@@ -118,9 +144,7 @@ export default function RoomClient({ code }: { code: string }) {
 
   const safeAct = useCallback(
     (payload: Record<string, unknown>) => {
-      act(payload).catch(() => {
-        /* message already shown */
-      });
+      act(payload).catch(() => {});
     },
     [act],
   );
@@ -129,17 +153,37 @@ export default function RoomClient({ code }: { code: string }) {
     () => (view ? view.seats.filter((s) => view.mySeatIds.includes(s.id)) : []),
     [view],
   );
-  const gmSeatOfMine = mySeats[0];
 
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
 
   if (fatal) {
     return (
       <main className="shell">
         <div className="spacer" />
-        <div className="banner err">{fatal}</div>
-        <button className="primary block" onClick={() => router.push('/')}>
+        <div className="note err">{fatal}</div>
+        <p className="tiny center">
+          Der Raum ist auf dem Server nicht mehr da. Wenn das ständig passiert, fehlt dem
+          Deployment der Speicher — siehe README.
+        </p>
+        <button
+          className="primary block"
+          onClick={() => {
+            clearToken(code);
+            router.push('/');
+          }}
+        >
           Zur Startseite
+        </button>
+        <button
+          className="quiet block"
+          onClick={() => {
+            misses.current = 0;
+            setFatal('');
+            bootstrapped.current = false;
+            location.reload();
+          }}
+        >
+          Nochmal versuchen
         </button>
         <div className="spacer" />
       </main>
@@ -157,16 +201,17 @@ export default function RoomClient({ code }: { code: string }) {
   }
 
   const impostorCount =
-    view.settings?.impostorCount ??
-    (view.results ? view.results.impostorSeatIds.length : 2);
-  const activeSeats = view.seats.filter((s) => !s.spectator);
-  const revealedCount = activeSeats.filter((s) => s.revealed).length;
-  const votedCount = activeSeats.filter((s) => s.hasVoted).length;
+    view.settings?.impostorCount ?? (view.results ? view.results.impostorSeatIds.length : 2);
+  const playing = view.seats.filter((s) => !s.spectator);
+  const revealed = playing.filter((s) => s.revealed).length;
+  const voted = playing.filter((s) => s.hasVoted).length;
+  const minPlayers = impostorCount + 2;
+  const canStart = view.activeCount >= minPlayers;
 
   const phaseLabel: Record<RoomView['phase'], string> = {
     lobby: 'Lobby',
-    topicVote: 'Themenwahl',
-    reveal: 'Rollen ansehen',
+    topicVote: 'Thema',
+    reveal: 'Karten',
     discussion: 'Diskussion',
     voting: 'Abstimmung',
     results: 'Auflösung',
@@ -183,26 +228,22 @@ export default function RoomClient({ code }: { code: string }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      /* user cancelled */
+      /* cancelled */
     }
   }
 
-  // ---------------------------------------------------------------------------
+  const inRound = ['reveal', 'discussion', 'voting', 'results'].includes(view.phase);
+
   return (
     <main className="shell">
-      <header className="topbar">
-        <span className="brand grow">Impostor</span>
-        <span className="muted" style={{ fontSize: 14 }}>
+      <header className="row">
+        <span className="eyebrow grow">
           {phaseLabel[view.phase]}
-          {view.roundNumber > 0 &&
-          ['reveal', 'discussion', 'voting', 'results'].includes(view.phase)
-            ? ` · Runde ${view.roundNumber}`
-            : ''}
+          {inRound ? ` · Runde ${view.roundNumber}` : ` · ${code}`}
         </span>
-        {/* Discreet gear: game master only, opens without any visible side effect. */}
         {view.isGm && view.settings && (
           <button className="icon-btn" onClick={() => setGearOpen(true)} aria-label="Einstellungen">
-            ⚙️
+            ⚙︎
           </button>
         )}
         <button className="icon-btn" onClick={() => setMenuOpen(true)} aria-label="Menü">
@@ -210,64 +251,54 @@ export default function RoomClient({ code }: { code: string }) {
         </button>
       </header>
 
-      {error && <div className="banner err">{error}</div>}
+      {reconnecting && <div className="note warn">Verbindung wackelt — versuche es weiter …</div>}
+      {error && <div className="note err">{error}</div>}
 
       {view.spectating && view.phase !== 'lobby' && view.phase !== 'results' && (
-        <div className="banner info">
-          👀 Du bist Zuschauer. Du siehst alles – auch wer Impostor ist. Bitte nichts verraten!
+        <div className="note info">
+          👀 Du schaust zu und siehst alles — auch wer Impostor ist. Nichts verraten!
         </div>
       )}
 
-      {/* ------------------------------- LOBBY ------------------------------ */}
+      {/* ------------------------------ LOBBY ------------------------------ */}
       {view.phase === 'lobby' && (
         <>
-          {view.mode === 'multi' && (
-            <div className="card stack center">
-              <h3>Raumcode</h3>
-              <div className="code-pill" style={{ fontSize: 30, letterSpacing: '0.3em' }}>
-                {code}
-              </div>
-              <div className="qr">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/api/qr?code=${code}`} alt={`QR-Code für Raum ${code}`} />
-              </div>
-              <button className="block" onClick={shareLink}>
-                {copied ? '✅ Link kopiert' : '🔗 Link teilen'}
-              </button>
-              <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-                Scannen oder Code auf der Startseite eingeben.
-              </p>
+          <div className="panel stack center">
+            <span className="eyebrow">Raumcode</span>
+            <div className="code-hero">
+              <span className="value">{code}</span>
             </div>
-          )}
-
-          {view.mode === 'single' && (
-            <div className="banner info">
-              🤝 Ein-Gerät-Modus: Trage alle Mitspieler ein. Das Handy wird später reihum
-              weitergegeben.
+            <div className="qr">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/api/qr?code=${code}`} alt={`QR-Code für Raum ${code}`} />
             </div>
-          )}
-
-          <div className="card stack">
-            <h3>
-              Spieler ({view.seats.length}) · {view.activeCount} spielen mit
-            </h3>
-            <SeatList
-              view={view}
-              onToggleSpectator={(seatId, play) =>
-                safeAct({ type: 'setPlayNextRound', seatId, value: play })
-              }
-              onRemove={(seatId) => safeAct({ type: 'removeSeat', seatId })}
-            />
-            {view.seats.length === 0 && <p className="muted">Noch niemand da.</p>}
+            <button className="block" onClick={shareLink}>
+              {copied ? '✓ Link kopiert' : 'Link teilen'}
+            </button>
           </div>
 
-          <div className="card stack">
-            <h3>{view.mode === 'single' ? 'Spieler anlegen' : 'Weiterer Spieler an diesem Handy'}</h3>
+          <div className="stack">
+            <span className="eyebrow">
+              {view.seats.length} {view.seats.length === 1 ? 'Spieler' : 'Spieler'}
+              {view.spectatorCount > 0 && ` · ${view.spectatorCount} schauen zu`}
+            </span>
+            <SeatChips view={view} onToggle={safeAct} onRemove={safeAct} />
+            {view.seats.length === 0 ? (
+              <p className="muted">Noch niemand da.</p>
+            ) : (
+              <p className="tiny">Auf einen Namen tippen = zuschauen statt mitspielen.</p>
+            )}
+          </div>
+
+          <div className="panel stack">
+            <span className="eyebrow">
+              {mySeats.length === 0 ? 'Dein Name' : 'Ohne eigenes Handy dabei?'}
+            </span>
             <div className="row">
               <input
                 className="grow"
                 type="text"
-                placeholder="Name"
+                placeholder={mySeats.length === 0 ? 'z.B. Jonas' : 'Name hinzufügen'}
                 value={newSeatName}
                 maxLength={24}
                 onChange={(e) => setNewSeatName(e.target.value)}
@@ -280,77 +311,58 @@ export default function RoomClient({ code }: { code: string }) {
               />
               <button
                 className="primary"
+                style={{ width: 62, padding: 0, fontSize: 26 }}
                 disabled={!newSeatName.trim() || busy}
                 onClick={() => {
                   safeAct({ type: 'addSeat', name: newSeatName.trim() });
                   setNewSeatName('');
                 }}
+                aria-label="Spieler hinzufügen"
               >
                 +
               </button>
             </div>
-            {view.mode === 'multi' && (
-              <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-                Nur nötig, wenn mehrere Leute dieses Handy teilen. Dieses Gerät zeigt dann die
-                Karten nacheinander mit Weitergabe-Screen.
-              </p>
-            )}
-          </div>
-
-          {view.isGm && (
-            <div className="card stack">
-              <h3>Gamemaster</h3>
-              {view.mode === 'multi' && (
-                <Toggle
-                  label="Ich spiele mit"
-                  hint={
-                    mySeats.length > 0
-                      ? `Du spielst als ${mySeats.map((s) => s.name).join(', ')}.`
-                      : 'Du leitest nur und siehst alle Rollen.'
-                  }
-                  value={mySeats.length > 0}
-                  onChange={(v) => {
-                    if (v) {
-                      safeAct({ type: 'addSeat', name: loadName() || 'Gamemaster' });
-                    } else if (gmSeatOfMine) {
-                      for (const s of mySeats) safeAct({ type: 'removeSeat', seatId: s.id });
-                    }
-                  }}
-                />
-              )}
-              <button
-                className="primary block"
-                disabled={busy || view.activeCount < impostorCount + 2}
-                onClick={() => safeAct({ type: 'startTopicVote' })}
-              >
-                Themen-Voting starten
-              </button>
-              {view.activeCount < impostorCount + 2 && (
-                <p className="muted" style={{ margin: 0 }}>
-                  Es werden mindestens {impostorCount + 2} mitspielende Spieler gebraucht (aktuell{' '}
-                  {view.activeCount}).
-                </p>
-              )}
-            </div>
-          )}
-          {!view.isGm && (
-            <p className="muted center">Warten auf den Gamemaster …</p>
-          )}
-        </>
-      )}
-
-      {/* ---------------------------- TOPIC VOTE ---------------------------- */}
-      {view.phase === 'topicVote' && (
-        <>
-          <div className="card tight">
-            <h2 style={{ margin: 0 }}>Welches Universum?</h2>
-            <p className="muted" style={{ margin: '4px 0 0' }}>
-              {Object.keys(view.myTopicVotes).length > 0
-                ? 'Deine Stimme ist abgegeben – du kannst sie noch ändern.'
-                : 'Stimme für ein Thema ab.'}
+            <p className="tiny">
+              {mySeats.length === 0
+                ? 'Ohne Namen leitest du nur und siehst alle Rollen.'
+                : 'Diese Person spielt an deinem Handy mit. Bei der Rollenvergabe kommt dann automatisch ein Weitergabe-Screen dazwischen.'}
             </p>
           </div>
 
+          {view.isGm && (
+            <>
+              <div className="panel stack">
+                <span className="eyebrow">Wie viele Impostor?</span>
+                <Stepper
+                  value={impostorCount}
+                  min={1}
+                  max={3}
+                  disabled={busy}
+                  onChange={(v) => safeAct({ type: 'updateSettings', impostorCount: v })}
+                />
+                <p className="tiny">
+                  So viele Stimmen hat auch jeder in der Abstimmung. Mindestens {minPlayers}{' '}
+                  Mitspielende nötig.
+                </p>
+              </div>
+
+              <button
+                className="go block"
+                disabled={busy || !canStart}
+                onClick={() => safeAct({ type: 'startTopicVote' })}
+              >
+                {canStart ? 'Los geht’s' : `Noch ${minPlayers - view.activeCount} Spieler fehlen`}
+              </button>
+            </>
+          )}
+          {!view.isGm && <p className="muted center">Warten auf den Gamemaster …</p>}
+        </>
+      )}
+
+      {/* ---------------------------- TOPIC VOTE --------------------------- */}
+      {view.phase === 'topicVote' && (
+        <>
+          <h2>Welches Universum?</h2>
           <div className="stack">
             {view.topics.map((t) => {
               const mine = Object.values(view.myTopicVotes).includes(t.id);
@@ -358,45 +370,30 @@ export default function RoomClient({ code }: { code: string }) {
                 <button
                   key={t.id}
                   className={`select-target${mine ? ' sel' : ''}`}
+                  disabled={view.mySeatIds.length === 0}
                   onClick={() => {
                     for (const seatId of view.mySeatIds) {
                       safeAct({ type: 'voteTopic', seatId, topicId: t.id });
                     }
                   }}
-                  disabled={view.mySeatIds.length === 0}
                 >
-                  <span className="check">{mine ? '✓' : ''}</span>
-                  <span className="grow">
-                    {t.name}
-                    {t.custom && <span className="tag" style={{ marginLeft: 8 }}>eigen</span>}
-                  </span>
-                  <span className="muted">{t.votes > 0 ? `${t.votes} ×` : ''}</span>
+                  <span className="check">✓</span>
+                  <span className="grow">{t.name}</span>
+                  {t.votes > 0 && <span className="tally">{t.votes}</span>}
                 </button>
               );
             })}
           </div>
 
-          <button className="ghost block" onClick={() => setTopicSheetOpen(true)}>
-            ➕ Eigenes Thema hinzufügen
+          <button className="quiet block" onClick={() => setTopicSheetOpen(true)}>
+            + Eigenes Thema
           </button>
 
           {view.isGm && (
-            <div className="card stack">
-              <h3>Runde starten</h3>
-              <select
-                value={overrideTopic}
-                onChange={(e) => setOverrideTopic(e.target.value)}
-                style={{
-                  minHeight: 'var(--tap)',
-                  borderRadius: 14,
-                  border: '1px solid var(--line)',
-                  background: '#0e1422',
-                  color: 'var(--text)',
-                  padding: '0 14px',
-                  font: 'inherit',
-                }}
-              >
-                <option value="">Ergebnis des Votings übernehmen</option>
+            <div className="panel stack">
+              <span className="eyebrow">Starten</span>
+              <select value={overrideTopic} onChange={(e) => setOverrideTopic(e.target.value)}>
+                <option value="">Ergebnis der Abstimmung nehmen</option>
                 {view.topics.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
@@ -404,7 +401,7 @@ export default function RoomClient({ code }: { code: string }) {
                 ))}
               </select>
               <button
-                className="primary block"
+                className="go block"
                 disabled={busy}
                 onClick={() =>
                   safeAct(
@@ -414,9 +411,9 @@ export default function RoomClient({ code }: { code: string }) {
                   )
                 }
               >
-                🎲 Rollen verteilen
+                Rollen verteilen
               </button>
-              <button className="ghost block" onClick={() => safeAct({ type: 'backToLobby' })}>
+              <button className="quiet block" onClick={() => safeAct({ type: 'backToLobby' })}>
                 Zurück zur Lobby
               </button>
             </div>
@@ -424,7 +421,7 @@ export default function RoomClient({ code }: { code: string }) {
         </>
       )}
 
-      {/* ------------------------------ REVEAL ------------------------------ */}
+      {/* ------------------------------ REVEAL ----------------------------- */}
       {view.phase === 'reveal' && (
         <>
           {view.myRoles.length > 0 ? (
@@ -437,51 +434,47 @@ export default function RoomClient({ code }: { code: string }) {
           ) : view.results ? (
             <Results results={view.results} spectatorPreview />
           ) : (
-            <p className="muted center">Du bist in dieser Runde Zuschauer.</p>
+            <p className="muted center">Du schaust diese Runde zu.</p>
           )}
 
-          <div className="card stack">
+          <div className="panel stack">
             <div className="row">
-              <span className="grow muted">Karten gesehen</span>
+              <span className="eyebrow grow">Karten gesehen</span>
               <strong>
-                {revealedCount}/{activeSeats.length}
+                {revealed}/{playing.length}
               </strong>
             </div>
             <div className="progress">
-              <div
-                style={{
-                  width: `${activeSeats.length ? (revealedCount / activeSeats.length) * 100 : 0}%`,
-                }}
-              />
+              <i style={{ width: `${playing.length ? (revealed / playing.length) * 100 : 0}%` }} />
             </div>
           </div>
 
           {view.isGm && (
             <button
-              className="primary block"
+              className="go block"
               disabled={busy}
               onClick={() => safeAct({ type: 'startDiscussion' })}
             >
-              💬 Diskussion starten
+              Diskussion starten
             </button>
           )}
         </>
       )}
 
-      {/* ---------------------------- DISCUSSION ---------------------------- */}
+      {/* ---------------------------- DISCUSSION --------------------------- */}
       {view.phase === 'discussion' && (
         <>
-          <div className="card stack">
-            <h2 style={{ margin: 0 }}>Redet!</h2>
+          <div className="panel stack">
+            <h2>Redet!</h2>
             <p className="muted" style={{ margin: 0 }}>
-              Reihum ein Satz über euren Charakter – vage genug, dass ein Impostor nicht sofort
-              auffliegt, konkret genug, dass ihr etwas merkt.
+              Reihum ein Satz über euren Charakter. Vage genug, dass ein Impostor nicht sofort
+              auffliegt — konkret genug, dass ihr etwas merkt.
             </p>
           </div>
 
           {view.myRoles.length > 0 && (
             <button className="block" onClick={() => setPeekOpen(true)}>
-              🔍 Meine Karte nochmal ansehen
+              Karte nochmal ansehen
             </button>
           )}
 
@@ -489,17 +482,17 @@ export default function RoomClient({ code }: { code: string }) {
 
           {view.isGm && (
             <button
-              className="primary block"
+              className="go block"
               disabled={busy}
               onClick={() => safeAct({ type: 'startVoting' })}
             >
-              🗳️ Abstimmung starten
+              Abstimmung starten
             </button>
           )}
         </>
       )}
 
-      {/* ------------------------------ VOTING ------------------------------ */}
+      {/* ------------------------------ VOTING ----------------------------- */}
       {view.phase === 'voting' && (
         <>
           {view.mySeatIds.some((id) => !view.seats.find((s) => s.id === id)?.spectator) ? (
@@ -514,69 +507,69 @@ export default function RoomClient({ code }: { code: string }) {
           ) : view.results ? (
             <Results results={view.results} spectatorPreview />
           ) : (
-            <p className="muted center">Du bist Zuschauer – lehn dich zurück.</p>
+            <p className="muted center">Du schaust zu — lehn dich zurück.</p>
           )}
 
-          <div className="card stack">
-            <h3>Wer hat schon gewählt?</h3>
-            <div className="stack">
-              {activeSeats.map((s) => (
-                <div key={s.id} className="seat">
-                  <span className={`dot ${s.hasVoted ? 'on' : 'off'}`} />
-                  <span className="grow">{s.name}</span>
-                  <span className="muted" style={{ fontSize: 14 }}>
-                    {s.hasVoted ? 'fertig' : 'wählt noch'}
-                  </span>
-                </div>
-              ))}
+          <div className="panel stack">
+            <div className="row">
+              <span className="eyebrow grow">Abgestimmt</span>
+              <span className="dots">
+                {playing.map((s) => (
+                  <i key={s.id} className={s.hasVoted ? 'on' : ''} title={s.name} />
+                ))}
+              </span>
             </div>
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Angezeigt wird nur <em>ob</em> jemand gewählt hat – nie für wen.
+            <p className="tiny">
+              Sichtbar ist nur, <em>ob</em> jemand gewählt hat — nie für wen.
             </p>
           </div>
 
           {view.isGm && (
             <button
               className="block"
-              disabled={busy || votedCount === 0}
+              disabled={busy || voted === 0}
               onClick={() => safeAct({ type: 'finishRound' })}
             >
-              Jetzt auflösen ({votedCount}/{activeSeats.length} haben gewählt)
+              Jetzt auflösen ({voted}/{playing.length})
             </button>
           )}
         </>
       )}
 
-      {/* ------------------------------ RESULTS ----------------------------- */}
+      {/* ------------------------------ RESULTS ---------------------------- */}
       {view.phase === 'results' && view.results && (
         <>
           <Results results={view.results} />
 
-          <div className="card stack">
-            <h3>Nächste Runde</h3>
-            <SeatList
-              view={view}
-              onToggleSpectator={(seatId, play) =>
-                safeAct({ type: 'setPlayNextRound', seatId, value: play })
-              }
-              onRemove={(seatId) => safeAct({ type: 'removeSeat', seatId })}
-            />
-            <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-              Zuschauen? Schalte „spielt mit“ für dich aus. Zuschauer sehen ab dem Rundenstart alle
-              Rollen.
+          <div className="stack">
+            <span className="eyebrow">Nächste Runde</span>
+            <SeatChips view={view} onToggle={safeAct} onRemove={safeAct} />
+            <p className="tiny">
+              Antippen schaltet zwischen Mitspielen und Zuschauen um. Zuschauer sehen ab dem
+              Rundenstart alle Rollen.
             </p>
           </div>
 
           {view.isGm && (
             <>
+              <div className="panel stack">
+                <span className="eyebrow">Impostor</span>
+                <Stepper
+                  value={impostorCount}
+                  min={1}
+                  max={3}
+                  disabled={busy}
+                  onChange={(v) => safeAct({ type: 'updateSettings', impostorCount: v })}
+                />
+              </div>
               <button
-                className="primary block"
+                className="go block"
                 disabled={busy}
                 onClick={() => safeAct({ type: 'nextRound' })}
               >
-                ▶️ Nächste Runde
+                Nächste Runde
               </button>
-              <button className="ghost block" onClick={() => safeAct({ type: 'backToLobby' })}>
+              <button className="quiet block" onClick={() => safeAct({ type: 'backToLobby' })}>
                 Zurück zur Lobby
               </button>
             </>
@@ -586,7 +579,7 @@ export default function RoomClient({ code }: { code: string }) {
 
       <div className="spacer" />
 
-      {/* ------------------------------ sheets ------------------------------ */}
+      {/* ------------------------------ sheets ----------------------------- */}
       {gearOpen && view.settings && (
         <GearSheet
           settings={view.settings}
@@ -602,13 +595,12 @@ export default function RoomClient({ code }: { code: string }) {
           topics={view.topics}
           isGm={view.isGm}
           onClose={() => setTopicSheetOpen(false)}
-          onSubmit={async (json) => {
-            const res = (await act({ type: 'addCustomTopic', json })) as unknown as {
+          onSubmit={async (json) =>
+            (await act({ type: 'addCustomTopic', json })) as unknown as {
               topicName: string;
               pairCount: number;
-            };
-            return res;
-          }}
+            }
+          }
           onRemove={async (topicId) => {
             await act({ type: 'removeCustomTopic', topicId });
           }}
@@ -648,49 +640,50 @@ export default function RoomClient({ code }: { code: string }) {
 
 // ---------------------------------------------------------------------------
 
-function SeatList({
+function SeatChips({
   view,
-  onToggleSpectator,
+  onToggle,
   onRemove,
 }: {
   view: RoomView;
-  onToggleSpectator: (seatId: string, play: boolean) => void;
-  onRemove: (seatId: string) => void;
+  onToggle: (p: Record<string, unknown>) => void;
+  onRemove: (p: Record<string, unknown>) => void;
 }) {
+  const editable = view.phase === 'lobby' || view.phase === 'results';
   return (
-    <div className="stack">
+    <div className="players">
       {view.seats.map((s) => {
-        const canControl = view.mySeatIds.includes(s.id) || view.isGm;
+        const mine = view.mySeatIds.includes(s.id);
+        const canControl = mine || view.isGm;
         return (
-          <div key={s.id} className={`seat${view.mySeatIds.includes(s.id) ? ' me' : ''}`}>
-            <span className={`dot ${s.online ? 'on' : 'off'}`} />
-            <span className="grow" style={{ minWidth: 0 }}>
-              <span style={{ fontWeight: 650 }}>{s.name}</span>
-              {view.mySeatIds.includes(s.id) && (
-                <span className="muted" style={{ fontSize: 13 }}>
-                  {' '}
-                  (dieses Gerät)
-                </span>
-              )}
-            </span>
-            {s.isGmSeat && <span className="tag gm">GM</span>}
-            {s.unclaimed && <span className="tag">frei</span>}
-            {!s.playNextRound && <span className="tag spec">Zuschauer</span>}
-            {canControl && (
+          <span
+            key={s.id}
+            className={`chip-player${mine ? ' me' : ''}${s.playNextRound ? '' : ' out'}`}
+            onClick={() =>
+              canControl &&
+              editable &&
+              onToggle({ type: 'setPlayNextRound', seatId: s.id, value: !s.playNextRound })
+            }
+            role={canControl && editable ? 'button' : undefined}
+            tabIndex={canControl && editable ? 0 : undefined}
+          >
+            <Avatar name={s.name} />
+            <span className="nm">{s.name}</span>
+            {s.isGmSeat && <span className="badge gm">GM</span>}
+            {!s.playNextRound && <span className="badge watch">👀</span>}
+            {view.isGm && editable && (
               <button
-                className="small"
-                onClick={() => onToggleSpectator(s.id, !s.playNextRound)}
-                aria-label={`${s.name} ${s.playNextRound ? 'zuschauen lassen' : 'mitspielen lassen'}`}
+                className="x"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove({ type: 'removeSeat', seatId: s.id });
+                }}
+                aria-label={`${s.name} entfernen`}
               >
-                {s.playNextRound ? '👀' : '🎮'}
-              </button>
-            )}
-            {view.isGm && (view.phase === 'lobby' || view.phase === 'results') && (
-              <button className="small danger" onClick={() => onRemove(s.id)} aria-label="Entfernen">
                 ✕
               </button>
             )}
-          </div>
+          </span>
         );
       })}
     </div>
@@ -715,7 +708,6 @@ function MenuSheet({
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [successor, setSuccessor] = useState('');
 
-  // Other devices in the room, labelled by the seats they hold.
   const otherDevices = useMemo(() => {
     const byDevice = new Map<string, string[]>();
     for (const s of view.seats) {
@@ -733,112 +725,91 @@ function MenuSheet({
 
   return (
     <Sheet title={`Raum ${code}`} onClose={onClose}>
-      <div className="stack">
-        <button className="block" onClick={onOpenTopics}>
-          &#10133; Eigenes Thema hinzufügen
-        </button>
+      <button className="block" onClick={onOpenTopics}>
+        + Eigenes Thema
+      </button>
 
-        {freeSeats.length > 0 && (
-          <>
-            <h3>Freie Plätze übernehmen</h3>
-            {freeSeats.map((s) => (
+      {freeSeats.length > 0 && (
+        <>
+          <span className="eyebrow">Freie Plätze übernehmen</span>
+          {freeSeats.map((s) => (
+            <button
+              key={s.id}
+              className="block"
+              onClick={() => onAction({ type: 'claimSeat', seatId: s.id })}
+            >
+              {s.name} übernehmen
+            </button>
+          ))}
+        </>
+      )}
+
+      {mySeats.length > 1 && (
+        <>
+          <span className="eyebrow">An diesem Handy</span>
+          {mySeats.map((s) => (
+            <div key={s.id} className="rowline">
+              <span className="grow">{s.name}</span>
               <button
-                key={s.id}
-                className="block"
-                onClick={() => onAction({ type: 'claimSeat', seatId: s.id })}
+                className="chip"
+                onClick={() => onAction({ type: 'releaseSeat', seatId: s.id })}
               >
-                {s.name} übernehmen
+                freigeben
               </button>
-            ))}
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Dieses Gerät zeigt die Karten aller übernommenen Spieler nacheinander, mit
-              Weitergabe-Screen dazwischen.
-            </p>
-          </>
-        )}
+            </div>
+          ))}
+        </>
+      )}
 
-        {mySeats.length > 1 && (
-          <>
-            <h3>Spieler an diesem Gerät</h3>
-            {mySeats.map((s) => (
-              <div key={s.id} className="seat">
-                <span className="grow">{s.name}</span>
-                <button
-                  className="small"
-                  onClick={() => onAction({ type: 'releaseSeat', seatId: s.id })}
-                >
-                  freigeben
-                </button>
-              </div>
-            ))}
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Freigegebene Plätze kann ein anderes Handy hier übernehmen.
-            </p>
-          </>
-        )}
-
-        {view.isGm && otherDevices.length > 0 && (
-          <>
-            <h3>Gamemaster übergeben</h3>
-            {otherDevices.map((d) => (
-              <button
-                key={d.deviceId}
-                className="block"
-                onClick={() => {
-                  onAction({ type: 'transferGm', deviceId: d.deviceId });
-                  onClose();
-                }}
-              >
-                An {d.label} übergeben
-              </button>
-            ))}
-          </>
-        )}
-
-        <h3 style={{ marginTop: 8 }}>Raum verlassen</h3>
-        {view.isGm && otherDevices.length > 0 && (
-          <>
-            <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-              Du bist Gamemaster. Wähle einen Nachfolger – sonst wird zufällig jemand bestimmt.
-            </p>
-            <select
-              value={successor}
-              onChange={(e) => setSuccessor(e.target.value)}
-              style={{
-                minHeight: 'var(--tap)',
-                borderRadius: 14,
-                border: '1px solid var(--line)',
-                background: '#0e1422',
-                color: 'var(--text)',
-                padding: '0 14px',
-                font: 'inherit',
+      {view.isGm && otherDevices.length > 0 && (
+        <>
+          <span className="eyebrow">Gamemaster übergeben</span>
+          {otherDevices.map((d) => (
+            <button
+              key={d.deviceId}
+              className="block"
+              onClick={() => {
+                onAction({ type: 'transferGm', deviceId: d.deviceId });
+                onClose();
               }}
             >
-              <option value="">Zufällig bestimmen</option>
-              {otherDevices.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </>
-        )}
-        {!confirmLeave ? (
-          <button className="danger block" onClick={() => setConfirmLeave(true)}>
-            Raum verlassen
-          </button>
-        ) : (
-          <button
-            className="danger block"
-            onClick={() => {
-              onAction({ type: 'leave', successorDeviceId: successor || undefined });
-              onLeave();
-            }}
-          >
-            Wirklich verlassen?
-          </button>
-        )}
-      </div>
+              An {d.label}
+            </button>
+          ))}
+        </>
+      )}
+
+      <span className="eyebrow">Raum verlassen</span>
+      {view.isGm && otherDevices.length > 0 && (
+        <>
+          <p className="tiny" style={{ margin: 0 }}>
+            Du bist Gamemaster — wähle einen Nachfolger, sonst entscheidet der Zufall.
+          </p>
+          <select value={successor} onChange={(e) => setSuccessor(e.target.value)}>
+            <option value="">Zufällig bestimmen</option>
+            {otherDevices.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+      {!confirmLeave ? (
+        <button className="danger block" onClick={() => setConfirmLeave(true)}>
+          Verlassen
+        </button>
+      ) : (
+        <button
+          className="danger block"
+          onClick={() => {
+            onAction({ type: 'leave', successorDeviceId: successor || undefined });
+            onLeave();
+          }}
+        >
+          Wirklich?
+        </button>
+      )}
     </Sheet>
   );
 }

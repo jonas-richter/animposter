@@ -64,7 +64,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
           if (room.phase !== 'lobby' && room.phase !== 'topicVote' && room.phase !== 'results') {
             throw new GameError('Neue Spieler können erst zwischen den Runden dazukommen.');
           }
-          if (room.mode === 'multi' && !isGm(room, device) && seatsOf(room, device.id).length >= 8) {
+          if (!isGm(room, device) && seatsOf(room, device.id).length >= 8) {
             throw new GameError('Maximal 8 Spieler pro Gerät.');
           }
           addSeat(room, device.id, cleanName(body.name));

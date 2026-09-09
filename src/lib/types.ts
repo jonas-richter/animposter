@@ -1,11 +1,10 @@
 // Core domain types for the Impostor party game.
 //
 // Key concept: a DEVICE (one phone/browser) can own several SEATS (players).
-//  - Multi-device mode: normally 1 device = 1 seat, but a device may cover more.
-//  - Single-device mode: one device owns every seat ("pass the phone around").
+// There is no separate "pass the phone" mode: whoever scans the QR code plays
+// on their own phone, and any extra players added on a device simply share it.
+// A device with more than one seat automatically gets the handoff flow.
 // The game master is a DEVICE, not a seat, so a GM can play along or not.
-
-export type RoomMode = 'single' | 'multi';
 
 export type Phase =
   | 'lobby' // players gather / seats are created
@@ -97,7 +96,6 @@ export interface Topic {
 
 export interface Room {
   code: string;
-  mode: RoomMode;
   createdAt: number;
   updatedAt: number;
   version: number;
@@ -183,7 +181,6 @@ export interface TopicMeta {
 
 export interface RoomView {
   code: string;
-  mode: RoomMode;
   phase: Phase;
   version: number;
   roundNumber: number;

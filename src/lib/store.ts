@@ -34,6 +34,24 @@ if (STORAGE_BACKEND === 'redis') {
   redis = new Redis({ url: REDIS_URL!, token: REDIS_TOKEN! });
 }
 
+/**
+ * In-memory storage only works when every request hits the same process.
+ * On a serverless host (Vercel/Netlify) that is NOT the case: each request may
+ * land on a different instance, and instances get recycled when idle. The room
+ * then vanishes between two requests and players get thrown out with
+ * "Raum nicht gefunden". This flag lets the UI warn about exactly that.
+ */
+const IS_SERVERLESS = Boolean(process.env.VERCEL || process.env.NETLIFY);
+
+export function storageInfo() {
+  return {
+    backend: STORAGE_BACKEND,
+    serverless: IS_SERVERLESS,
+    /** True when rooms survive reliably across requests. */
+    reliable: STORAGE_BACKEND === 'redis' || !IS_SERVERLESS,
+  };
+}
+
 // --- in-memory fallback -----------------------------------------------------
 
 interface MemoryState {

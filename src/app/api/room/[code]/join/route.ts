@@ -29,11 +29,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
         return { token: known.token, deviceId: known.id };
       }
 
-      if (room.mode === 'single') {
-        throw new GameError(
-          'Dieser Raum läuft im Ein-Gerät-Modus. Es können keine weiteren Geräte beitreten.',
-        );
-      }
       if (room.phase !== 'lobby' && room.phase !== 'topicVote' && room.phase !== 'results') {
         throw new GameError('Die Runde läuft gerade. Bitte kurz warten und dann beitreten.');
       }

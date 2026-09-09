@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'crypto';
 import { BUILTIN_TOPICS } from './characters';
-import type { Assignment, CharacterPair, Device, Room, RoomMode, Round, Seat, Topic } from './types';
+import type { Assignment, CharacterPair, Device, Room, Round, Seat, Topic } from './types';
 
 export class GameError extends Error {}
 
@@ -39,11 +39,10 @@ export function cleanName(raw: unknown): string {
   return n;
 }
 
-export function createRoom(code: string, mode: RoomMode): { room: Room; device: Device } {
+export function createRoom(code: string): { room: Room; device: Device } {
   const device: Device = { id: randomUUID(), token: makeToken(), lastSeen: Date.now() };
   const room: Room = {
     code,
-    mode,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     version: 1,

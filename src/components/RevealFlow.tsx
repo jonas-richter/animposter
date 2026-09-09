@@ -5,7 +5,7 @@ import RoleCard from './RoleCard';
 import type { MyRole } from '@/lib/types';
 
 // Reveal phase for one device.
-//  - exactly one seat  -> straight to the card, no extra screens
+//  - exactly one seat  -> straight to the card, no extra screens at all
 //  - several seats     -> handoff screen -> card -> "Gesehen" -> handoff -> ...
 export default function RevealFlow({
   roles,
@@ -24,7 +24,6 @@ export default function RevealFlow({
     multi ? 'handoff' : 'card',
   );
 
-  // Restart the whole sequence when a new round begins.
   useEffect(() => {
     setIndex(0);
     setStage(roles.length > 1 ? 'handoff' : 'card');
@@ -35,11 +34,11 @@ export default function RevealFlow({
 
   if (stage === 'finished') {
     return (
-      <div className="card stack center">
-        <div style={{ fontSize: 40 }}>✅</div>
-        <h2 style={{ margin: 0 }}>Alle Karten gesehen</h2>
+      <div className="panel stack center">
+        <div style={{ fontSize: 44 }}>✅</div>
+        <h2>Alle haben geschaut</h2>
         <p className="muted" style={{ margin: 0 }}>
-          {roles.map((r) => r.seatName).join(', ')} — bereit. Wartet auf den Gamemaster.
+          {roles.map((r) => r.seatName).join(', ')}
         </p>
       </div>
     );
@@ -50,12 +49,11 @@ export default function RevealFlow({
       <div className="stack">
         <div className="handoff">
           <div>
-            <div className="muted" style={{ letterSpacing: '0.16em', fontSize: 13 }}>
-              HANDY WEITERGEBEN AN
-            </div>
+            <div className="arrow">👉</div>
+            <span className="eyebrow">Handy weitergeben an</span>
             <div className="who">{role.seatName}</div>
-            <p className="muted" style={{ margin: 0 }}>
-              Spieler {index + 1} von {roles.length}
+            <p className="tiny" style={{ margin: 0 }}>
+              {index + 1} von {roles.length}
             </p>
           </div>
         </div>
@@ -69,7 +67,7 @@ export default function RevealFlow({
   return (
     <div className="stack">
       {multi && (
-        <div className="banner info center">
+        <div className="note info center">
           Karte von <strong>{role.seatName}</strong> ({index + 1}/{roles.length})
         </div>
       )}
@@ -94,13 +92,11 @@ export default function RevealFlow({
             }
           }}
         >
-          {index + 1 < roles.length
-            ? '✅ Gesehen – weitergeben'
-            : '✅ Gesehen – alle fertig'}
+          {index + 1 < roles.length ? 'Gesehen – weitergeben' : 'Gesehen – alle fertig'}
         </button>
       ) : (
-        <p className="muted center" style={{ margin: 0 }}>
-          Merk dir deinen Charakter. Der Gamemaster startet gleich die Diskussion.
+        <p className="tiny center" style={{ margin: 0 }}>
+          Merk dir deinen Charakter.
         </p>
       )}
     </div>

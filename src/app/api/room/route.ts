@@ -1,18 +1,14 @@
 import { NextResponse } from 'next/server';
 import { createRoom, makeRoomCode } from '@/lib/game';
 import { getRoom, putRoom } from '@/lib/store';
-import { handleError, noStore, readJson } from '@/lib/http';
-import type { RoomMode } from '@/lib/types';
+import { handleError, noStore } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 // POST /api/room  -> create a new room, caller becomes game master device.
-export async function POST(req: Request) {
+export async function POST() {
   try {
-    const body = await readJson(req);
-    const mode: RoomMode = body.mode === 'single' ? 'single' : 'multi';
-
     let code = '';
     for (let i = 0; i < 12; i++) {
       const candidate = makeRoomCode();
@@ -23,11 +19,11 @@ export async function POST(req: Request) {
     }
     if (!code) throw new Error('Konnte keinen freien Raumcode finden. Bitte nochmal versuchen.');
 
-    const { room, device } = createRoom(code, mode);
+    const { room, device } = createRoom(code);
     await putRoom(room);
 
     return noStore(
-      NextResponse.json({ code: room.code, token: device.token, deviceId: device.id, mode }),
+      NextResponse.json({ code: room.code, token: device.token, deviceId: device.id }),
     );
   } catch (e) {
     return handleError(e);

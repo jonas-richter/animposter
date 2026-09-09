@@ -1,32 +1,41 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
-import { createRoom, saveToken } from '@/lib/client';
+import { useEffect, useState } from 'react';
+import { createRoom, fetchHealth, saveToken } from '@/lib/client';
 
 export default function HomePage() {
   const router = useRouter();
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [joinCode, setJoinCode] = useState('');
+  const [storageBroken, setStorageBroken] = useState(false);
 
-  async function make(mode: 'single' | 'multi') {
+  // Warn loudly when rooms cannot survive between requests - otherwise players
+  // just get thrown out with "Raum nicht gefunden" and nobody knows why.
+  useEffect(() => {
+    fetchHealth()
+      .then((h) => setStorageBroken(!h.reliable))
+      .catch(() => {});
+  }, []);
+
+  async function create() {
     setError('');
-    setBusy(mode);
+    setBusy(true);
     try {
-      const res = await createRoom(mode);
+      const res = await createRoom();
       saveToken(res.code, res.token);
       router.push(`/room/${res.code}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Fehler beim Anlegen.');
-      setBusy(null);
+      setError(e instanceof Error ? e.message : 'Raum konnte nicht erstellt werden.');
+      setBusy(false);
     }
   }
 
   function join() {
     const code = joinCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (code.length < 4) {
-      setError('Bitte den 4-stelligen Raumcode eingeben.');
+      setError('Der Raumcode hat 4 Zeichen.');
       return;
     }
     router.push(`/join/${code}`);
@@ -34,67 +43,54 @@ export default function HomePage() {
 
   return (
     <main className="shell">
-      <div style={{ marginTop: '6dvh' }}>
-        <div className="brand" style={{ fontSize: 15, letterSpacing: '0.3em' }}>
-          PARTYSPIEL
-        </div>
+      <div style={{ marginTop: '9dvh' }}>
         <h1>Impostor</h1>
-        <p className="muted" style={{ marginTop: 8 }}>
-          Alle bekommen denselben Charakter aus einem Universum – bis auf zwei. Redet, hört genau
-          hin und findet die Impostor.
+        <p className="lead" style={{ marginTop: 12 }}>
+          Alle bekommen denselben Charakter — bis auf ein paar Fälschungen. Redet, hört genau hin,
+          enttarnt sie.
         </p>
       </div>
 
-      {error && <div className="banner err">{error}</div>}
+      {storageBroken && (
+        <div className="note warn">
+          <strong>Kein Speicher verbunden.</strong> Räume verschwinden hier nach wenigen Sekunden
+          wieder. In der README steht unter „Deployment“, wie du das mit drei Klicks behebst.
+        </div>
+      )}
 
-      <div className="card stack">
-        <h3>Neues Spiel</h3>
-        <button
-          className="primary block"
-          onClick={() => make('multi')}
-          disabled={busy !== null}
-        >
-          {busy === 'multi' ? 'Raum wird erstellt …' : '📱 Mehrere Handys (QR-Code)'}
-        </button>
-        <p className="muted" style={{ margin: 0 }}>
-          Jeder scannt den QR-Code und spielt auf dem eigenen Handy. Ein Handy kann auch mehrere
-          Spieler übernehmen.
-        </p>
-        <button className="block" onClick={() => make('single')} disabled={busy !== null}>
-          {busy === 'single' ? 'Raum wird erstellt …' : '🤝 Ein Handy (herumreichen)'}
-        </button>
-        <p className="muted" style={{ margin: 0 }}>
-          Alle spielen an diesem Gerät. Namen eintragen, dann wird das Handy reihum weitergegeben.
-        </p>
-      </div>
+      {error && <div className="note err">{error}</div>}
 
-      <div className="card stack">
-        <h3>Einem Raum beitreten</h3>
+      <div className="spacer" />
+
+      <button className="primary block" onClick={create} disabled={busy}>
+        {busy ? 'Moment …' : 'Raum erstellen'}
+      </button>
+
+      <div className="panel stack">
+        <span className="eyebrow">Oder beitreten</span>
         <input
+          className="code-input"
           type="text"
           inputMode="text"
           autoCapitalize="characters"
+          autoCorrect="off"
           autoComplete="off"
-          placeholder="Raumcode, z.B. K7QM"
+          placeholder="CODE"
           value={joinCode}
           maxLength={8}
           onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
           onKeyDown={(e) => e.key === 'Enter' && join()}
-          style={{
-            fontFamily: 'ui-monospace, monospace',
-            letterSpacing: '0.3em',
-            textAlign: 'center',
-            fontSize: 22,
-          }}
+          aria-label="Raumcode"
         />
-        <button className="block" onClick={join}>
+        <button className="block" onClick={join} disabled={joinCode.length < 4}>
           Beitreten
         </button>
       </div>
 
-      <div className="spacer" />
-      <p className="muted center" style={{ fontSize: 13 }}>
-        4–24 Spieler · ca. 5 Minuten pro Runde
+      <p className="tiny center">
+        4–24 Spieler · ~5 Minuten pro Runde
+        <br />
+        Ein Handy pro Person — oder eins für mehrere, das geht auch.
       </p>
     </main>
   );

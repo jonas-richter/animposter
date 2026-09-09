@@ -114,11 +114,21 @@ async function request<T>(url: string, init: RequestInit & { token?: string | nu
   return data as T;
 }
 
-export function createRoom(mode: 'single' | 'multi') {
+export function createRoom() {
   return request<{ code: string; token: string; deviceId: string }>('/api/room', {
     method: 'POST',
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({}),
   });
+}
+
+export interface Health {
+  backend: 'redis' | 'memory';
+  serverless: boolean;
+  reliable: boolean;
+}
+
+export function fetchHealth() {
+  return request<Health>('/api/health', { method: 'GET' });
 }
 
 export function joinRoom(code: string, name: string | null, token: string | null) {

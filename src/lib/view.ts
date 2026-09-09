@@ -129,7 +129,6 @@ export function buildView(room: Room, device: Device): RoomView {
 
   return {
     code: room.code,
-    mode: room.mode,
     phase: room.phase,
     version: room.version,
     roundNumber: round?.n ?? room.roundCounter,

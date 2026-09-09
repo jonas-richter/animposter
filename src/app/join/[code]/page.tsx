@@ -14,7 +14,7 @@ export default function JoinPage() {
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(true);
 
-  // If this device already has a token for the room, walk straight back in.
+  // Already have a session for this room? Walk straight back in.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -39,7 +39,7 @@ export default function JoinPage() {
   async function submit() {
     const trimmed = name.trim();
     if (!trimmed) {
-      setError('Bitte einen Namen eingeben.');
+      setError('Wie heißt du?');
       return;
     }
     setBusy(true);
@@ -67,17 +67,17 @@ export default function JoinPage() {
 
   return (
     <main className="shell">
-      <div style={{ marginTop: '8dvh' }}>
-        <div className="brand" style={{ fontSize: 15, letterSpacing: '0.3em' }}>
-          RAUM {code}
-        </div>
-        <h1>Mitspielen</h1>
+      <div style={{ marginTop: '10dvh' }}>
+        <span className="eyebrow">Raum {code}</span>
+        <h1 style={{ fontSize: 'clamp(36px, 12vw, 52px)', marginTop: 6 }}>Mitspielen</h1>
       </div>
 
-      {error && <div className="banner err">{error}</div>}
+      {error && <div className="note err">{error}</div>}
 
-      <div className="card stack">
-        <h3>Dein Name</h3>
+      <div className="spacer" />
+
+      <div className="panel stack">
+        <span className="eyebrow">Dein Name</span>
         <input
           type="text"
           placeholder="z.B. Jonas"
@@ -87,17 +87,19 @@ export default function JoinPage() {
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
         />
-        <button className="primary block" onClick={submit} disabled={busy}>
-          {busy ? 'Trete bei …' : 'Beitreten'}
+        <button className="primary block" onClick={submit} disabled={busy || !name.trim()}>
+          {busy ? 'Trete bei …' : 'Los geht’s'}
         </button>
-        <p className="muted" style={{ margin: 0 }}>
-          Weitere Spieler an diesem Handy kannst du gleich in der Lobby hinzufügen.
-        </p>
       </div>
 
+      <p className="tiny center">
+        Spielt jemand ohne Handy mit? Den Namen gleich in der Lobby ergänzen — dieses Handy zeigt
+        die Karten dann nacheinander.
+      </p>
+
       <div className="spacer" />
-      <button className="ghost block" onClick={() => router.push('/')}>
-        Zurück
+      <button className="quiet block" onClick={() => router.push('/')}>
+        Abbrechen
       </button>
     </main>
   );

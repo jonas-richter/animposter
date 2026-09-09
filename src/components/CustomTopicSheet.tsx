@@ -65,7 +65,7 @@ export default function CustomTopicSheet({
   return (
     <Sheet title="Eigenes Thema hinzufügen" onClose={onClose}>
       <div className="stack">
-        <p className="muted" style={{ margin: 0 }}>
+        <p className="tiny" style={{ margin: 0 }}>
           Schritt 1: Prompt kopieren, bei ChatGPT/Claude einfügen und das Wunschthema eintragen.
           Schritt 2: die JSON-Antwort hier einfügen.
         </p>
@@ -81,31 +81,31 @@ export default function CustomTopicSheet({
           <textarea readOnly value={CUSTOM_TOPIC_PROMPT} style={{ minHeight: 200 }} />
         </details>
 
-        <h3 style={{ marginTop: 8 }}>JSON einfügen</h3>
+        <span className="eyebrow">JSON einfügen</span>
         <textarea
           value={json}
           onChange={(e) => setJson(e.target.value)}
           placeholder='{ "name": "Star Wars", "pairs": [ … ] }'
           spellCheck={false}
         />
-        {error && <div className="banner err">{error}</div>}
-        {ok && <div className="banner ok">{ok}</div>}
+        {error && <div className="note err">{error}</div>}
+        {ok && <div className="note ok">{ok}</div>}
         <button className="primary block" onClick={() => add(json)} disabled={busy || !json.trim()}>
           {busy ? 'Prüfe …' : 'Thema hinzufügen'}
         </button>
 
         {saved.length > 0 && (
           <>
-            <h3 style={{ marginTop: 8 }}>Auf diesem Gerät gespeichert</h3>
+            <span className="eyebrow">Auf diesem Gerät gespeichert</span>
             <div className="stack">
               {saved.map((t) => (
-                <div key={t.name} className="seat">
+                <div key={t.name} className="rowline">
                   <span className="grow">{t.name}</span>
-                  <button className="small" onClick={() => add(t.json)} disabled={busy}>
+                  <button className="chip" onClick={() => add(t.json)} disabled={busy}>
                     In den Raum laden
                   </button>
                   <button
-                    className="small danger"
+                    className="chip danger"
                     onClick={() => {
                       deleteSavedTopic(t.name);
                       setSaved(loadSavedTopics());
@@ -122,19 +122,17 @@ export default function CustomTopicSheet({
 
         {customTopics.length > 0 && (
           <>
-            <h3 style={{ marginTop: 8 }}>Eigene Themen in diesem Raum</h3>
+            <span className="eyebrow">Eigene Themen in diesem Raum</span>
             <div className="stack">
               {customTopics.map((t) => (
-                <div key={t.id} className="seat">
+                <div key={t.id} className="rowline">
                   <span className="grow">
                     {t.name}{' '}
-                    <span className="muted" style={{ fontSize: 14 }}>
-                      · {t.pairCount} Paare
-                    </span>
+                    <span className="tiny">· {t.pairCount} Paare</span>
                   </span>
                   {isGm && (
                     <button
-                      className="small danger"
+                      className="chip danger"
                       onClick={() => onRemove(t.id)}
                       aria-label={`${t.name} entfernen`}
                     >
@@ -147,7 +145,7 @@ export default function CustomTopicSheet({
           </>
         )}
 
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        <p className="tiny" style={{ margin: 0 }}>
           Sicherheit: Das JSON wird streng geprüft (Struktur, Längen, erlaubte Bild-Hosts). Texte
           werden immer als reiner Text angezeigt, nie als HTML ausgeführt.
         </p>

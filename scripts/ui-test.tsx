@@ -186,7 +186,7 @@ async function main() {
   console.log(`\nImpostor UI-Durchlauf (jsdom) gegen ${BASE}\n`);
 
   console.log('1) Raum anlegen und drei Geräte verbinden');
-  const create = await api('/api/room', { method: 'POST', body: { mode: 'multi' } });
+  const create = await api('/api/room', { method: 'POST' });
   const code: string = create.data.code;
   const gmToken: string = create.data.token;
   await api(`/api/room/${code}/join`, { method: 'POST', token: gmToken, body: { name: 'Jonas' } });
@@ -207,11 +207,12 @@ async function main() {
   check('GM-Lobby zeigt Raumcode', gm.text().includes(code), gm.text().slice(0, 200));
   check('GM sieht QR-Bereich', !!gm.container.querySelector('.qr'));
   check('Alle 4 Spieler in der Liste', ['Jonas', 'Mira', 'Tom', 'Lena'].every((n) => gm.text().includes(n)));
-  check('Mira sieht keinen GM-Startknopf', !mira.find('Themen-Voting starten'));
+  check('Mira sieht keinen GM-Startknopf', !mira.find('Los geht'));
+  check('Impostor-Anzahl in der Lobby einstellbar', !!gm.container.querySelector('.stepper'));
   check('Zahnrad nur beim GM', !!gm.find('Einstellungen') && !mira.find('Einstellungen'));
 
   console.log('2) Themen-Voting');
-  await gm.click('Themen-Voting starten');
+  await gm.click('Los geht');
   await mira.settle();
   await tom.settle();
   check('Mira sieht Themenliste', mira.text().includes('Welches Universum'), mira.text().slice(0, 200));
@@ -221,7 +222,14 @@ async function main() {
   await tom.click('Naruto');
   await gm.settle();
   // Mira = 1 seat, Tom's phone = 2 seats -> 3 votes in total.
-  check('GM sieht 3 Stimmen', /Naruto/.test(gm.text()) && /3 ×/.test(gm.text()), gm.text().slice(0, 300));
+  const narutoRow = [...gm.container.querySelectorAll('.select-target')].find(
+    (el) => (el.querySelector('.grow')?.textContent ?? '').trim() === 'Naruto',
+  );
+  check(
+    'GM sieht 3 Stimmen für Naruto',
+    (narutoRow?.querySelector('.tally')?.textContent ?? '').trim() === '3',
+    narutoRow?.textContent ?? 'Zeile nicht gefunden',
+  );
 
   console.log('3) Rollen verteilen und aufdecken');
   await gm.click('Rollen verteilen');
@@ -231,22 +239,22 @@ async function main() {
   check('GM sieht verdeckte Karte', gm.text().includes('Antippen zum Aufdecken'), gm.text().slice(0, 200));
   check(
     'Gerät mit 2 Spielern zeigt Übergabe-Screen',
-    tom.text().includes('HANDY WEITERGEBEN AN'),
+    tom.text().includes('Handy weitergeben an'),
     tom.text().slice(0, 300),
   );
   check(
     'Einzelnes Gerät zeigt KEINEN Übergabe-Screen',
-    !mira.text().includes('HANDY WEITERGEBEN AN'),
+    !mira.text().includes('Handy weitergeben an'),
     mira.text().slice(0, 200),
   );
 
   // GM + Mira: simple tap to reveal
   for (const phone of [gm, mira]) {
     await phone.click('Antippen zum Aufdecken');
-    check(`${phone.name}: Charakter sichtbar`, phone.text().includes('DEIN CHARAKTER'), phone.text().slice(0, 200));
+    check(`${phone.name}: Charakter sichtbar`, phone.text().includes('Dein Charakter'), phone.text().slice(0, 200));
     check(
       `${phone.name}: Impostor-Status angezeigt`,
-      /IMPOSTOR|kein Impostor/.test(phone.text()),
+      /Du bist Impostor|Du bist echt/.test(phone.text()),
       phone.text().slice(0, 200),
     );
   }
@@ -261,15 +269,15 @@ async function main() {
   await tom.click('Gesehen – weitergeben');
   check(
     'Tom+Lena: Übergabe-Screen zwischen den Spielern',
-    tom.text().includes('HANDY WEITERGEBEN AN'),
+    tom.text().includes('Handy weitergeben an'),
     tom.text().slice(0, 300),
   );
-  check('Tom+Lena: Karte ist wieder weg', !tom.text().includes('DEIN CHARAKTER'));
+  check('Tom+Lena: Karte ist wieder weg', !tom.container.querySelector('.rolecard.shown'));
   await tom.click(/Ich bin .* – Karte zeigen/);
   check('Tom+Lena: zweite Karte startet verdeckt', tom.text().includes('Antippen zum Aufdecken'));
   await tom.click('Antippen zum Aufdecken');
   await tom.click('Gesehen – alle fertig');
-  check('Tom+Lena: Sequenz beendet', tom.text().includes('Alle Karten gesehen'), tom.text().slice(0, 200));
+  check('Tom+Lena: Sequenz beendet', tom.text().includes('Alle haben geschaut'), tom.text().slice(0, 200));
 
   await gm.settle();
   check('GM-Fortschritt 4/4', gm.text().includes('4/4'), gm.text().slice(0, 400));
@@ -282,10 +290,10 @@ async function main() {
   await gm.click('Abstimmung starten');
   await mira.settle();
   await tom.settle();
-  check('Mira sieht Wahlzettel', mira.text().includes('Wer sind die Impostor'), mira.text().slice(0, 200));
+  check('Mira sieht Wahlzettel', mira.text().includes('Wer ist Impostor'), mira.text().slice(0, 200));
   check(
     'Tom+Lena: Übergabe-Screen auch beim Voting',
-    tom.text().includes('HANDY WEITERGEBEN AN'),
+    tom.text().includes('Handy weitergeben an'),
     tom.text().slice(0, 300),
   );
 
@@ -293,28 +301,28 @@ async function main() {
   const miraTargets = ['Jonas', 'Tom', 'Lena'].slice(0, 2);
   for (const t of miraTargets) check(`Mira wählt ${t}`, await mira.clickCandidate(t));
   check('Stimmen-Zähler 2/2', /2\/2/.test(mira.text()), mira.text().slice(0, 300));
-  await mira.click('Stimme abgeben');
+  await mira.click('Abstimmen (');
   await mira.settle();
-  check('Mira hat abgestimmt', mira.text().includes('Stimme abgegeben'), mira.text().slice(0, 200));
+  check('Mira hat abgestimmt', mira.text().includes('Stimme steht'), mira.text().slice(0, 200));
 
   // GM votes
   for (const t of ['Mira', 'Tom']) await gm.clickCandidate(t);
-  await gm.click('Stimme abgeben');
+  await gm.click('Abstimmen (');
   await gm.settle();
 
   // Tom's phone votes twice with a handoff in between
   await tom.click(/Ich bin .* – abstimmen/);
   for (const t of ['Jonas', 'Mira']) await tom.clickCandidate(t);
-  await tom.click('Stimme abgeben');
+  await tom.click('Abstimmen (');
   await tom.settle();
   check(
     'Tom+Lena: zweiter Übergabe-Screen vor der zweiten Stimme',
-    tom.text().includes('HANDY WEITERGEBEN AN'),
+    tom.text().includes('Handy weitergeben an'),
     tom.text().slice(0, 300),
   );
   await tom.click(/Ich bin .* – abstimmen/);
   for (const t of ['Jonas', 'Mira']) await tom.clickCandidate(t);
-  await tom.click('Stimme abgeben');
+  await tom.click('Abstimmen (');
   await tom.settle(1500);
 
   console.log('5) Auflösung');
@@ -325,12 +333,12 @@ async function main() {
   check('Stolpersteine sichtbar', gm.text().includes('Stolpersteine'));
   check('Gesamtstand sichtbar', gm.text().includes('Gesamtstand'));
   check('Mira sieht dieselbe Auflösung', mira.text().includes('Die Impostor waren'));
-  const impostorTags = [...gm.container.querySelectorAll('.tag.imp')].map((e) => e.textContent ?? '');
-  check('Zwei Impostor markiert', impostorTags.filter((t) => t.includes('🎭')).length === 2, impostorTags.join('|'));
+  const impostorBadges = [...gm.container.querySelectorAll('.badge.imp')];
+  check('Zwei Impostor markiert', impostorBadges.length === 2, String(impostorBadges.length));
 
   console.log('6) Zahnrad-Menü und zweite Runde');
   await gm.click('Einstellungen');
-  check('Einstellungen offen', gm.text().includes('Impostor wissen Bescheid'), gm.text().slice(-300));
+  check('Zahnrad-Menü offen', gm.text().includes('Impostor wissen Bescheid'), gm.text().slice(-300));
   await mira.settle();
   check(
     'Öffnen des Zahnrads löst bei anderen keine Reaktion aus',
@@ -358,7 +366,7 @@ async function main() {
   await gm.click('Rollen verteilen');
   await mira.settle();
   await mira.click('Antippen zum Aufdecken');
-  check('Runde 2: Karte da', mira.text().includes('DEIN CHARAKTER'));
+  check('Runde 2: Karte da', mira.text().includes('Dein Charakter'));
   check(
     'Impostor-Wissen aus: kein Impostor-Hinweis',
     !/Du bist ein IMPOSTOR|Du bist kein Impostor/.test(mira.text()),
@@ -370,22 +378,21 @@ async function main() {
   // Simulate a screen lock / reload: fresh mount with the same stored token.
   const miraAgain = await mountPhone('Mira-neu', code, p2.data.token);
   await miraAgain.settle();
-  check('Nach Reload wieder im Raum', miraAgain.text().includes('Impostor'), miraAgain.text().slice(0, 120));
+  check('Nach Reload wieder im Raum', !!miraAgain.container.querySelector('.rolecard'), miraAgain.text().slice(0, 120));
   check(
     'Karte startet nach Reload wieder verdeckt',
-    miraAgain.text().includes('Antippen zum Aufdecken'),
+    !miraAgain.container.querySelector('.rolecard.shown'),
     miraAgain.text().slice(0, 200),
   );
   await miraAgain.click('Antippen zum Aufdecken');
   const charAfter = miraAgain.container.querySelector('.rolecard .name')?.textContent ?? '';
   check('Gleiche Rolle nach Reconnect', charBefore.length > 0 && charBefore === charAfter, `${charBefore} vs ${charAfter}`);
 
-  console.log('8) Ein-Gerät-Modus (Handy herumreichen)');
-  const single = await api('/api/room', { method: 'POST', body: { mode: 'single' } });
+  console.log('8) Ein Gerät für alle (Handy herumreichen)');
+  const single = await api('/api/room', { method: 'POST' });
   const sCode: string = single.data.code;
   const solo = await mountPhone('Ein Handy', sCode, single.data.token);
-  check('Ein-Gerät-Hinweis sichtbar', solo.text().includes('Ein-Gerät-Modus'), solo.text().slice(0, 200));
-  check('Kein QR im Ein-Gerät-Modus', !solo.container.querySelector('.qr'));
+  check('Lobby zeigt QR und Code', !!solo.container.querySelector('.qr') && solo.text().includes(sCode));
 
   const input = solo.container.querySelector('input[type=text]') as HTMLInputElement;
   for (const n of ['Anna', 'Ben', 'Cem', 'Dana']) {
@@ -397,26 +404,30 @@ async function main() {
       setter.call(input, n);
       input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     });
-    await solo.click('+');
+    await solo.click('Spieler hinzufügen');
   }
-  check('Vier Spieler angelegt', ['Anna', 'Ben', 'Cem', 'Dana'].every((n) => solo.text().includes(n)), solo.text().slice(0, 300));
+  check(
+    'Vier Spieler an einem Gerät',
+    ['Anna', 'Ben', 'Cem', 'Dana'].every((n) => solo.text().includes(n)),
+    solo.text().slice(0, 300),
+  );
 
-  await solo.click('Themen-Voting starten');
+  await solo.click('Los geht');
   await solo.click('Harry Potter');
   await solo.click('Rollen verteilen');
-  check('Ein-Gerät: Übergabe-Screen zuerst', solo.text().includes('HANDY WEITERGEBEN AN'), solo.text().slice(0, 250));
+  check('Übergabe-Screen zuerst', solo.text().includes('Handy weitergeben an'), solo.text().slice(0, 250));
   for (let i = 0; i < 4; i++) {
     await solo.click(/Ich bin .* – Karte zeigen/);
-    check(`Ein-Gerät: Karte ${i + 1} verdeckt`, solo.text().includes('Antippen zum Aufdecken'));
+    check(`Karte ${i + 1} verdeckt`, !solo.container.querySelector('.rolecard.shown'));
     await solo.click('Antippen zum Aufdecken');
-    check(`Ein-Gerät: Karte ${i + 1} sichtbar`, solo.text().includes('DEIN CHARAKTER'));
+    check(`Karte ${i + 1} sichtbar`, solo.text().includes('Dein Charakter'));
     await solo.click(i < 3 ? 'Gesehen – weitergeben' : 'Gesehen – alle fertig');
   }
-  check('Ein-Gerät: alle durch', solo.text().includes('Alle Karten gesehen'), solo.text().slice(0, 200));
+  check('Alle durch', solo.text().includes('Alle haben geschaut'), solo.text().slice(0, 200));
 
   await solo.click('Diskussion starten');
   await solo.click('Abstimmung starten');
-  check('Ein-Gerät: Übergabe vor der Abstimmung', solo.text().includes('HANDY WEITERGEBEN AN'));
+  check('Übergabe vor der Abstimmung', solo.text().includes('Handy weitergeben an'));
   for (let i = 0; i < 4; i++) {
     await solo.click(/Ich bin .* – abstimmen/);
     let picked = 0;
@@ -424,12 +435,12 @@ async function main() {
       if (picked >= 2) break;
       if (await solo.clickCandidate(n)) picked++;
     }
-    check(`Ein-Gerät: Stimme ${i + 1} hat 2 Ziele`, picked === 2, String(picked));
-    await solo.click('Stimme abgeben');
+    check(`Stimme ${i + 1} hat 2 Ziele`, picked === 2, String(picked));
+    await solo.click('Abstimmen (');
     await solo.settle(400);
   }
   await solo.settle(1500);
-  check('Ein-Gerät: Auflösung', solo.text().includes('Die Impostor waren'), solo.text().slice(0, 250));
+  check('Auflösung', solo.text().includes('Die Impostor waren'), solo.text().slice(0, 250));
 
   console.log(`\n${passed} bestanden, ${failed} fehlgeschlagen\n`);
   process.exit(failed === 0 ? 0 : 1);

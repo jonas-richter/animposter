@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { RoomView, SeatPublic } from '@/lib/types';
 
-// Voting phase for one device. Same handoff logic as the reveal flow:
-// several seats on one device vote one after another and cannot see each
-// other's ballot.
+// Voting for one device. Same handoff rule as the reveal flow: several seats on
+// one device vote one after another and cannot see each other's ballot.
 export default function VotingFlow({
   view,
   impostorCount,
@@ -17,17 +16,18 @@ export default function VotingFlow({
   onVote: (seatId: string, targets: string[]) => Promise<void>;
   busy: boolean;
 }) {
-  const votableSeats = useMemo(
+  const openSeats = useMemo(
     () =>
       view.seats.filter(
         (s) => view.mySeatIds.includes(s.id) && !s.spectator && !view.myVotes[s.id],
       ),
     [view],
   );
-  const multi = view.mySeatIds.filter((id) => {
-    const s = view.seats.find((x) => x.id === id);
-    return s && !s.spectator;
-  }).length > 1;
+  const multi =
+    view.mySeatIds.filter((id) => {
+      const s = view.seats.find((x) => x.id === id);
+      return s && !s.spectator;
+    }).length > 1;
 
   const [index, setIndex] = useState(0);
   const [stage, setStage] = useState<'handoff' | 'ballot'>(multi ? 'handoff' : 'ballot');
@@ -40,36 +40,35 @@ export default function VotingFlow({
     setStage(multi ? 'handoff' : 'ballot');
   }, [multi, view.roundNumber]);
 
-  const seat = votableSeats[Math.min(index, Math.max(votableSeats.length - 1, 0))];
-
-  if (votableSeats.length === 0) {
+  if (openSeats.length === 0) {
     const done = view.seats.filter((s) => s.hasVoted && !s.spectator).length;
     const total = view.seats.filter((s) => !s.spectator).length;
     return (
-      <div className="card stack center">
-        <div style={{ fontSize: 40 }}>🗳️</div>
-        <h2 style={{ margin: 0 }}>Stimme abgegeben</h2>
+      <div className="panel stack center">
+        <div style={{ fontSize: 44 }}>🗳️</div>
+        <h2>Stimme steht</h2>
         <p className="muted" style={{ margin: 0 }}>
-          {done} von {total} haben gewählt.
+          {done} von {total} sind durch.
         </p>
         <div className="progress">
-          <div style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+          <i style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
         </div>
       </div>
     );
   }
+
+  const seat = openSeats[Math.min(index, openSeats.length - 1)];
 
   if (stage === 'handoff') {
     return (
       <div className="stack">
         <div className="handoff">
           <div>
-            <div className="muted" style={{ letterSpacing: '0.16em', fontSize: 13 }}>
-              HANDY WEITERGEBEN AN
-            </div>
+            <div className="arrow">👉</div>
+            <span className="eyebrow">Handy weitergeben an</span>
             <div className="who">{seat.name}</div>
-            <p className="muted" style={{ margin: 0 }}>
-              Noch {votableSeats.length} Stimme{votableSeats.length === 1 ? '' : 'n'} offen
+            <p className="tiny" style={{ margin: 0 }}>
+              Noch {openSeats.length} {openSeats.length === 1 ? 'Stimme' : 'Stimmen'} offen
             </p>
           </div>
         </div>
@@ -94,15 +93,12 @@ export default function VotingFlow({
   }
 
   async function submit() {
-    if (selected.length !== impostorCount) {
-      setError(`Bitte genau ${impostorCount} Spieler auswählen.`);
-      return;
-    }
+    if (selected.length !== impostorCount) return;
     try {
       await onVote(seat.id, selected);
       setSelected([]);
       setError('');
-      if (votableSeats.length > 1) {
+      if (openSeats.length > 1) {
         setIndex(0);
         setStage(multi ? 'handoff' : 'ballot');
       }
@@ -113,20 +109,20 @@ export default function VotingFlow({
 
   return (
     <div className="stack">
-      <div className="card tight">
-        <h2 style={{ margin: 0 }}>Wer sind die Impostor?</h2>
-        <p className="muted" style={{ margin: '4px 0 0' }}>
+      <div>
+        <h2>Wer ist Impostor?</h2>
+        <p className="muted" style={{ margin: '2px 0 0' }}>
           {multi ? (
             <>
-              Stimme von <strong>{seat.name}</strong> · genau {impostorCount} auswählen
+              Stimme von <strong>{seat.name}</strong> · {impostorCount} auswählen
             </>
           ) : (
-            <>Wähle genau {impostorCount} Spieler aus.</>
+            <>Wähle genau {impostorCount} {impostorCount === 1 ? 'Person' : 'Personen'}.</>
           )}
         </p>
       </div>
 
-      {error && <div className="banner err">{error}</div>}
+      {error && <div className="note err">{error}</div>}
 
       <div className="stack">
         {candidates.map((c) => (
@@ -135,19 +131,19 @@ export default function VotingFlow({
             className={`select-target${selected.includes(c.id) ? ' sel' : ''}`}
             onClick={() => toggle(c.id)}
           >
-            <span className="check">{selected.includes(c.id) ? '✓' : ''}</span>
+            <span className="check">✓</span>
             <span className="grow">{c.name}</span>
-            {c.hasVoted && <span className="tag ok">gewählt</span>}
+            {c.hasVoted && <span className="badge ok">fertig</span>}
           </button>
         ))}
       </div>
 
       <button
-        className="primary block"
+        className="go block"
         onClick={submit}
         disabled={busy || selected.length !== impostorCount}
       >
-        {busy ? 'Sende …' : `Stimme abgeben (${selected.length}/${impostorCount})`}
+        {busy ? 'Sende …' : `Abstimmen (${selected.length}/${impostorCount})`}
       </button>
     </div>
   );

@@ -46,7 +46,7 @@ async function main() {
 
   // ---- create room --------------------------------------------------------
   console.log('1) Raum anlegen (Multi-Device)');
-  const create = await api('/api/room', { method: 'POST', body: { mode: 'multi' } });
+  const create = await api('/api/room', { method: 'POST' });
   check('Raum erstellt', create.status === 200 && !!create.data?.code, create.text);
   const code = create.data.code;
   const gm = create.data.token;
@@ -340,24 +340,32 @@ async function main() {
   const afterLeave = await api(`/api/room/${code}/state`, { token: gm });
   check('Token nach Verlassen ungültig', afterLeave.status === 401, String(afterLeave.status));
 
-  // ---- single device mode -------------------------------------------------
-  console.log('11) Ein-Gerät-Modus');
-  const sd = await api('/api/room', { method: 'POST', body: { mode: 'single' } });
+  // ---- one device covering everybody --------------------------------------
+  console.log('11) Ein Gerät für alle (Handy herumreichen)');
+  const sd = await api('/api/room', { method: 'POST' });
   const sCode = sd.data.code;
   const sTok = sd.data.token;
   for (const n of ['A', 'B', 'C', 'D']) {
     await act(sCode, sTok, { type: 'addSeat', name: n });
   }
-  const joinBlocked = await api(`/api/room/${sCode}/join`, {
+  const solo = await api(`/api/room/${sCode}/state`, { token: sTok });
+  check('Ein Gerät hält 4 Plätze', solo.data?.view?.mySeatIds?.length === 4);
+
+  // Same room, no special mode: another phone can still join at any time.
+  const lateJoin = await api(`/api/room/${sCode}/join`, {
     method: 'POST',
-    body: { name: 'Fremder' },
+    body: { name: 'Späti' },
   });
-  check('Fremdes Gerät kann nicht beitreten', joinBlocked.status === 400, joinBlocked.text.slice(0, 120));
+  check('Weiteres Gerät kann jederzeit dazu', lateJoin.status === 200, lateJoin.text.slice(0, 120));
 
   await act(sCode, sTok, { type: 'startTopicVote' });
   const sRound = await act(sCode, sTok, { type: 'startRound', topicId: 'onepiece' });
-  check('Ein-Gerät-Runde gestartet', sRound.data?.view?.phase === 'reveal', sRound.text.slice(0, 200));
+  check('Runde gestartet', sRound.data?.view?.phase === 'reveal', sRound.text.slice(0, 200));
   check('Ein Gerät hält 4 Rollen', sRound.data?.view?.myRoles?.length === 4);
+
+  // ---- health -------------------------------------------------------------
+  const health = await api('/api/health');
+  check('Health-Endpunkt antwortet', health.status === 200 && 'reliable' in (health.data ?? {}), health.text.slice(0, 120));
 
   // ---- QR -----------------------------------------------------------------
   const qr = await fetch(`${BASE}/api/qr?code=${sCode}`);

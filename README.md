@@ -103,6 +103,22 @@ Der kostenlose Upstash-Tarif (10.000 Befehle/Tag) reicht für viele Spieleabende
 > **Ohne diesen Schritt läuft es trotzdem** – solange nur wenige Leute gleichzeitig spielen und
 > du Glück hast. Für einen entspannten Abend: einfach machen, dauert zwei Minuten.
 
+### „Raum nicht gefunden" / Spieler fliegen raus
+
+Das ist **immer** dieses fehlende Storage. Ohne Redis liegt der Spielstand im Arbeitsspeicher
+genau einer Serverless-Instanz. Die nächste Anfrage landet auf einer anderen Instanz, die den
+Raum nicht kennt – und schon ist man draußen.
+
+Die App merkt das selbst: Ist kein Speicher verbunden, steht auf der Startseite ein gelber
+Hinweis. Prüfen kannst du es auch direkt unter `https://DEINE-URL/api/health`:
+
+```json
+{ "backend": "redis", "serverless": true, "reliable": true }
+```
+
+Steht dort `"backend": "memory"`, fehlt der Schritt oben. Nach dem Verbinden **einmal neu
+deployen**, sonst kennt die laufende Version die Variablen noch nicht.
+
 ---
 
 ## 3. Deployment auf Netlify
@@ -132,31 +148,26 @@ Danach einmal neu deployen.
 
 ### Raum anlegen
 
-Auf der Startseite wählt der Gamemaster einen von zwei Modi:
+Es gibt nur einen Knopf: **Raum erstellen**. Danach zeigt die Lobby Raumcode und QR-Code.
 
-**📱 Mehrere Handys (QR-Code)**
-Es erscheint ein Raumcode plus QR-Code. Alle anderen scannen ihn mit der Handykamera, geben
-ihren Namen ein und sind drin. Alternativ: Code auf der Startseite eintippen.
+Wie gespielt wird, ergibt sich von selbst:
 
-**🤝 Ein Handy (herumreichen)**
-Der Gamemaster trägt alle Namen selbst ein. Es gibt keinen QR-Code, kein weiteres Gerät kann
-beitreten. Das Handy wird später reihum weitergegeben.
-
-### Mischform: ein Handy für mehrere Spieler
-
-Auch im QR-Modus kann ein Handy mehrere Spieler übernehmen – praktisch, wenn jemand kein Handy
-dabei hat oder der Akku leer ist:
-
-- In der Lobby unter **„Weiterer Spieler an diesem Handy"** einfach weitere Namen eintragen.
-- Über das **⋯-Menü** lassen sich Plätze auch später freigeben oder übernehmen
-  (z.B. wenn jemand doch noch mit dem eigenen Handy einsteigt).
+- **Jeder mit eigenem Handy** → alle scannen den QR-Code (oder tippen den Code auf der
+  Startseite ein) und geben ihren Namen ein.
+- **Ein Handy für alle** → niemand scannt, stattdessen trägt der Gamemaster in der Lobby unter
+  „Dein Name" bzw. „Ohne eigenes Handy dabei?" alle Namen nacheinander ein.
+- **Mischung aus beidem** → genau so, wie es kommt. Wer ein Handy hat, scannt; für alle anderen
+  ergänzt jemand den Namen auf seinem Gerät.
 
 Sobald ein Gerät für **mehr als einen** Spieler zuständig ist, schaltet es automatisch in den
-Weitergabe-Ablauf: neutraler Übergabe-Screen („Gib das Handy an Lena weiter") → Karte antippen →
-„Gesehen – weitergeben" → Karte verdeckt sich → nächster Übergabe-Screen. Beim Voting genauso.
+Weitergabe-Ablauf: neutraler Übergabe-Screen („Handy weitergeben an Lena") → Karte antippen →
+„Gesehen – weitergeben" → Karte dreht sich zurück → nächster Übergabe-Screen. Beim Voting genauso.
 
 **Für den Normalfall (ein Spieler pro Handy) gibt es diese Screens nicht** – da tippt man direkt
 auf die eigene Karte, sonst nichts.
+
+Über das **⋯-Menü** lassen sich Plätze später freigeben oder von einem anderen Handy übernehmen,
+falls jemand doch noch mit dem eigenen Gerät einsteigt.
 
 ### Ablauf einer Runde
 
@@ -180,22 +191,27 @@ auf die eigene Karte, sonst nichts.
 
 ### Zuschauen
 
-Jeder kann sich über das 👀-Symbol neben seinem Namen auf „Zuschauer" stellen (in der Lobby oder
-nach der Auflösung). Zuschauer sehen **alles**, inklusive wer Impostor ist – das steht auch
-deutlich im Interface. Über das 🎮-Symbol steigt man zur nächsten Runde wieder ein.
+Tippe in der Lobby (oder nach der Auflösung) einfach auf deinen Namen – der Platz wechselt dann
+zwischen Mitspielen und Zuschauen. Zuschauer sehen **alles**, inklusive wer Impostor ist – das steht auch
+deutlich im Interface. Nochmal antippen, und man ist zur nächsten Runde wieder dabei.
 
-Auch ein Gamemaster, der nicht mitspielt („Ich spiele mit" ausgeschaltet), ist Zuschauer und
-sieht alle Rollen.
+Ein Gamemaster, der gar keinen Namen eingetragen hat, leitet nur – er ist damit ebenfalls
+Zuschauer und sieht alle Rollen.
 
-### Das Zahnrad ⚙️
+### Anzahl der Impostor
 
-Nur der Gamemaster sieht es, oben in der Kopfzeile. Darin:
+Stellt der Gamemaster in der Lobby ein (1 bis 3) – und nach jeder Auflösung erneut für die
+nächste Runde. Die Zahl bestimmt auch, wie viele Stimmen jeder in der Abstimmung hat.
+Mindestens `Impostor + 2` Mitspielende werden gebraucht.
 
-- **Impostor wissen Bescheid** – an: die Impostor sehen auf ihrer Karte, dass sie Impostor sind.
-  Aus: niemand weiß es, alle sehen nur ihren Charakter. Das ist die deutlich gemeinere Variante.
-- **Anzahl Impostor** – 1 bis 3.
+### Das Zahnrad ⚙︎
 
-Änderungen gelten **ab der nächsten Runde** und lösen bei den Mitspielern **keine sichtbare
+Nur der Gamemaster sieht es, oben in der Kopfzeile. Darin steckt genau eine Sache:
+
+**Impostor wissen Bescheid** – an: die Impostor sehen auf ihrer Karte, dass sie Impostor sind.
+Aus: niemand weiß es, alle sehen nur ihren Charakter. Das ist die deutlich gemeinere Variante.
+
+Die Änderung gilt **ab der nächsten Runde** und löst bei den Mitspielern **keine sichtbare
 Reaktion** aus. Niemand bekommt mit, dass du daran gedreht hast.
 
 ### Gamemaster abgeben / Raum verlassen
@@ -315,7 +331,7 @@ npm run test:ui    # Terminal 2 – kompletter Durchlauf durch die echte UI
   Client niemals fremde Rollen, die Impostor-Liste oder die Auflösung im Payload bekommt.
 - **`test:ui`** rendert die echten React-Komponenten (drei „Handys" gleichzeitig) und klickt eine
   Runde von der Lobby bis zur Auflösung durch – inklusive Weitergabe-Screens, Zahnrad-Menü,
-  Reconnect und Ein-Gerät-Modus.
+  Reconnect und ein Gerät, das alle vier Spieler abdeckt.
 
 ---
 
@@ -350,7 +366,7 @@ Gamemaster ausgeliefert. Die Rollenauslosung nutzt `crypto.randomBytes`, ist als
 **Sessions:** Jedes Gerät bekommt beim Beitritt ein zufälliges Token (24 Byte), das im
 `localStorage` liegt und bei jedem Request im Header `x-impostor-token` mitgeschickt wird. Ein
 Gerät kann mehrere Plätze („Sitze") halten – das ist das gemeinsame Fundament für den
-Ein-Gerät-Modus und die Mischform. Räume verfallen nach 8 Stunden automatisch.
+das Herumreichen eines Handys und jede Mischform. Räume verfallen nach 8 Stunden automatisch.
 
 ### Projektstruktur
 
