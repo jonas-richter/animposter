@@ -50,6 +50,17 @@ export default function GearSheet({
       />
 
       <Toggle
+        label="Abstimmen über „Was kennt ihr?“"
+        hint={
+          local.multiTopicVote
+            ? 'Jeder tippt alle Universen an, die er kennt. Gespielt wird, was die meisten kennen.'
+            : 'Jeder wählt genau ein Universum.'
+        }
+        value={local.multiTopicVote}
+        onChange={(v) => apply({ multiTopicVote: v })}
+      />
+
+      <Toggle
         label="Vorschläge erst freigeben"
         hint={
           local.proposalsNeedApproval

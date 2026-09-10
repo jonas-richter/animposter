@@ -159,6 +159,13 @@ export default function RoomClient({ code }: { code: string }) {
     };
   }, [code, token]);
 
+  // A new phase is a new screen - starting it halfway down the page (because
+  // that is where you were scrolled on the last one) reads as broken.
+  useEffect(() => {
+    if (!view?.phase) return;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [view?.phase]);
+
   // Errors should not sit there until the next action.
   useEffect(() => {
     if (!error) return;
@@ -302,10 +309,7 @@ export default function RoomClient({ code }: { code: string }) {
       </header>
 
       {view.deadline && ['discussion', 'voting'].includes(view.phase) && (
-        <Countdown
-          deadline={view.deadline}
-          total={view.phase === 'discussion' ? view.settings?.discussionSec : view.settings?.votingSec}
-        />
+        <Countdown deadline={view.deadline} total={view.phaseSeconds ?? undefined} />
       )}
 
       {reconnecting && <div className="note warn">Verbindung wackelt — versuche es weiter …</div>}
@@ -438,6 +442,7 @@ export default function RoomClient({ code }: { code: string }) {
         <>
           <TopicVote
             view={view}
+            multiMode={view.multiTopicVote}
             onVote={(seatId, topicId) => safeAct({ type: 'voteTopic', seatId, topicId })}
             onApprove={(topicId) => safeAct({ type: 'approveCustomTopic', topicId })}
             onRemove={(topicId) => safeAct({ type: 'removeCustomTopic', topicId })}
@@ -849,7 +854,11 @@ function SeatChips({
             <span className="nm">{s.name}</span>
             {s.isGmSeat && <span className="badge gm">GM</span>}
             {s.waiting && <span className="badge watch">wartet</span>}
-            {!s.playNextRound && !s.waiting && <span className="badge watch">👀</span>}
+            {!s.playNextRound && !s.waiting && (
+              <span className="eye" title="schaut zu" aria-label="schaut zu">
+                👁
+              </span>
+            )}
             {view.isGm && editable && (
               <button
                 className="x"

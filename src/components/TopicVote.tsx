@@ -12,11 +12,14 @@ import type { RoomView } from '@/lib/types';
 //                             casting one vote for everybody.
 export default function TopicVote({
   view,
+  multiMode,
   onVote,
   onApprove,
   onRemove,
 }: {
   view: RoomView;
+  /** Approval voting: tick everything you know instead of picking one. */
+  multiMode: boolean;
   onVote: (seatId: string, topicId: string) => void;
   onApprove: (topicId: string) => void;
   onRemove: (topicId: string) => void;
@@ -36,7 +39,9 @@ export default function TopicVote({
   const [hovered, setHovered] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const hasVoted = (id: string) => cast.current.has(id) || Boolean(view.myTopicVotes[id]);
+  const hasVoted = (id: string) =>
+    cast.current.has(id) || (view.myTopicVotes[id]?.length ?? 0) > 0;
+  const chosenBy = (seatId: string) => view.myTopicVotes[seatId] ?? [];
 
   // Keep the active orb on the first player who has not voted yet.
   useEffect(() => {
@@ -82,8 +87,15 @@ export default function TopicVote({
   }
 
   function assign(seatId: string, topicId: string) {
-    cast.current.add(seatId);
     onVote(seatId, topicId);
+    if (multiMode) return; // keep ticking for the same player
+    cast.current.add(seatId);
+    setActive(mySeats.find((s) => s.id !== seatId && !hasVoted(s.id))?.id ?? null);
+  }
+
+  /** Approval mode: hand the device on once this player is finished. */
+  function doneWithSeat(seatId: string) {
+    cast.current.add(seatId);
     setActive(mySeats.find((s) => s.id !== seatId && !hasVoted(s.id))?.id ?? null);
   }
 
@@ -105,20 +117,27 @@ export default function TopicVote({
   return (
     <>
       <div>
-        <h2>Welches Universum?</h2>
+        <h2>{multiMode ? 'Was kennt ihr?' : 'Welches Universum?'}</h2>
         <p className="muted" style={{ margin: '2px 0 0' }}>
-          {multi
-            ? `Zieh jeden Spieler auf ein Thema — oder antippen. ${votedCount}/${mySeats.length} vergeben.`
-            : 'Tipp auf ein Thema.'}
+          {multiMode
+            ? multi
+              ? `Jeder tippt alles an, was er kennt. ${votedCount}/${mySeats.length} fertig.`
+              : 'Tipp alles an, was du kennst — gespielt wird, was die meisten kennen.'
+            : multi
+              ? `Zieh jeden Spieler auf ein Thema — oder antippen. ${votedCount}/${mySeats.length} vergeben.`
+              : 'Tipp auf ein Thema.'}
         </p>
       </div>
 
       {multi && (
         <div className="orbs">
           {mySeats.map((s) => {
-            const votedFor = view.myTopicVotes[s.id];
+            const chosen = chosenBy(s.id);
             const done = hasVoted(s.id);
-            const topic = view.topics.find((t) => t.id === votedFor);
+            const label = chosen
+              .map((id) => view.topics.find((t) => t.id === id)?.name)
+              .filter(Boolean)
+              .join(', ');
             return (
               <button
                 key={s.id}
@@ -133,8 +152,8 @@ export default function TopicVote({
                   setHovered(null);
                 }}
                 onClick={() => setActive(s.id)}
-                title={topic ? `${s.name} → ${topic.name}` : s.name}
-                aria-label={topic ? `${s.name}, gewählt: ${topic.name}` : `${s.name}, offen`}
+                title={label ? `${s.name} → ${label}` : s.name}
+                aria-label={label ? `${s.name} hat gewählt` : `${s.name}, offen`}
               >
                 <span className="orb-face">{initials(s.name)}</span>
                 <span className="orb-name">{s.name}</span>
@@ -147,7 +166,7 @@ export default function TopicVote({
       <div className="stack" ref={listRef}>
         {view.topics.map((t) => {
           const mine = Object.entries(view.myTopicVotes)
-            .filter(([, tid]) => tid === t.id)
+            .filter(([, chosen]) => (chosen ?? []).includes(t.id))
             .map(([seatId]) => view.seats.find((s) => s.id === seatId)?.name)
             .filter(Boolean) as string[];
           return (
@@ -210,6 +229,17 @@ export default function TopicVote({
           );
         })}
       </div>
+
+      {multiMode && multi && active && (
+        <button className="grad go block" onClick={() => doneWithSeat(active)}>
+          {view.seats.find((s) => s.id === active)?.name} ist fertig
+        </button>
+      )}
+      {multiMode && !multi && chosenBy(mySeats[0]?.id ?? '').length > 0 && (
+        <p className="tiny center" style={{ margin: 0 }}>
+          {chosenBy(mySeats[0]?.id ?? '').length} ausgewählt — du kannst jederzeit ändern.
+        </p>
+      )}
 
       {drag && (
         <span

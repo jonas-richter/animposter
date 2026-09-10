@@ -425,7 +425,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px 6px 6px;
+  padding: 6px 10px 6px 6px;
   border-radius: 999px;
   background: var(--panel);
   border: 1px solid var(--edge);
@@ -458,8 +458,9 @@ textarea {
 }
 .chip-player .x {
   min-height: 0;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
   padding: 0;
   border: none;
   background: transparent;
@@ -485,6 +486,28 @@ textarea {
 .badge.watch {
   background: rgba(123, 92, 255, 0.2);
   color: #b9a8ff;
+}
+/* A spectator chip is a state, not a label. The boxed 👀 emoji sat off the
+   baseline and pushed the ✕ into the border; a dimmed chip with a plain glyph
+   reads better and keeps the row height. */
+.chip-player .eye {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.85;
+  flex: none;
+}
+.chip-player.out {
+  opacity: 1;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.22);
+  background: transparent;
+}
+.chip-player.out .nm,
+.chip-player.out .av {
+  opacity: 0.55;
+}
+.chip-player.out.me {
+  border-color: rgba(123, 92, 255, 0.5);
 }
 .badge.imp {
   background: rgba(255, 77, 109, 0.2);
@@ -899,7 +922,7 @@ ul.bullets li::marker {
 .sheet {
   width: 100%;
   max-width: 520px;
-  max-height: 88dvh;
+  max-height: 88svh;
   overflow-y: auto;
   padding: 16px 18px calc(26px + env(safe-area-inset-bottom));
   background: #100e1c;
@@ -909,7 +932,7 @@ ul.bullets li::marker {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  animation: rise 0.22s cubic-bezier(0.3, 1.2, 0.5, 1);
+  animation: rise 0.34s cubic-bezier(0.2, 1.1, 0.3, 1);
 }
 @keyframes fade {
   from {
@@ -918,7 +941,24 @@ ul.bullets li::marker {
 }
 @keyframes rise {
   from {
-    transform: translateY(18px);
+    transform: translateY(26px);
+    opacity: 0;
+  }
+}
+/* The contents stagger in behind the sheet, which is what makes it feel like
+   it unfolds rather than just appearing. */
+.sheet > * {
+  animation: sheet-item 0.32s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.sheet > *:nth-child(1) { animation-delay: 0.05s; }
+.sheet > *:nth-child(2) { animation-delay: 0.09s; }
+.sheet > *:nth-child(3) { animation-delay: 0.13s; }
+.sheet > *:nth-child(4) { animation-delay: 0.17s; }
+.sheet > *:nth-child(n + 5) { animation-delay: 0.2s; }
+@keyframes sheet-item {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
 }
 
@@ -1528,10 +1568,16 @@ button.big {
   border: 1px solid var(--edge);
 }
 .countdown .clock {
+  /* Tabular figures plus a reserved width: without both, the digits change
+     width every second and the negative tracking made them collide once the
+     pulse animation kicked in. */
   font-variant-numeric: tabular-nums;
-  font-weight: 900;
+  font-feature-settings: 'tnum' 1;
+  font-weight: 800;
   font-size: 22px;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.01em;
+  min-width: 3.6ch;
+  text-align: center;
   flex: none;
 }
 .countdown .bar {
@@ -1550,7 +1596,17 @@ button.big {
 }
 .countdown.urgent .clock {
   color: var(--danger);
-  animation: pulse 1s ease-in-out infinite;
+}
+/* Pulse the whole panel, not the text: animating opacity on a heavy numeric
+   glyph is what produced the doubled look. */
+.countdown.urgent {
+  animation: tick 1s ease-in-out infinite;
+}
+@keyframes tick {
+  50% {
+    border-color: rgba(255, 77, 109, 0.55);
+    background: rgba(255, 77, 109, 0.1);
+  }
 }
 .countdown.urgent .bar i {
   background: linear-gradient(90deg, var(--danger), #ff9770);
@@ -1568,6 +1624,10 @@ button.big {
 }
 .countdown.big .clock {
   font-size: clamp(56px, 12vw, 120px);
+  min-width: 4ch;
+}
+.countdown.big.urgent {
+  animation: none;
 }
 .countdown.big .bar {
   width: min(560px, 70vw);
@@ -1624,55 +1684,44 @@ button.big {
   border-radius: 999px;
   margin-top: -4px;
 }
-/* Live-stream hearts: pop in, then drift upward on a lazy S-curve while
-   fading. The horizontal sway is what makes it read as "floating" rather than
-   "sliding on a rail" - a straight vertical translate always looks mechanical.
-   The wrapper handles the rise, the inner emoji the sway, so the two curves can
-   have different easings. */
+/* Live-stream hearts.
+   One animation on the whole badge, so the emoji and the name never drift
+   apart. Both axes live in the same keyframes - two nested animations with
+   different easings is what made the earlier version look jittery. Slow,
+   even rise; the fade only starts in the last third. */
 .reaction {
-  animation-name: rise;
+  animation-name: floatup;
+  animation-timing-function: linear;
   will-change: transform, opacity;
 }
-.reaction .emoji {
-  display: block;
-  animation-name: sway;
-  animation-duration: inherit;
-  animation-timing-function: ease-in-out;
-  animation-iteration-count: 1;
-  animation-fill-mode: forwards;
-}
-@keyframes rise {
+@keyframes floatup {
   0% {
     opacity: 0;
-    transform: translateY(24px) scale(0.4);
+    transform: translate3d(0, 26px, 0) scale(calc(var(--scale, 1) * 0.55));
   }
-  12% {
+  10% {
     opacity: 1;
-    transform: translateY(0) scale(calc(var(--scale, 1) * 1.18));
-  }
-  22% {
-    transform: translateY(-6vh) scale(var(--scale, 1));
-  }
-  70% {
-    opacity: 0.95;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(calc(var(--rise, 46vh) * -1)) scale(calc(var(--scale, 1) * 0.72));
-  }
-}
-@keyframes sway {
-  0% {
-    transform: translateX(0) rotate(0deg);
+    transform: translate3d(calc(var(--sway, 20px) * 0.25), 0, 0)
+      scale(calc(var(--scale, 1) * 1.06));
   }
   30% {
-    transform: translateX(var(--sway, 30px)) rotate(var(--tilt, 8deg));
+    transform: translate3d(var(--sway, 20px), calc(var(--rise, 38vh) * -0.28), 0)
+      rotate(var(--tilt, 6deg)) scale(var(--scale, 1));
   }
-  62% {
-    transform: translateX(calc(var(--sway, 30px) * -0.72)) rotate(calc(var(--tilt, 8deg) * -1));
+  55% {
+    opacity: 1;
+    transform: translate3d(calc(var(--sway, 20px) * -0.6), calc(var(--rise, 38vh) * -0.55), 0)
+      rotate(calc(var(--tilt, 6deg) * -0.6)) scale(var(--scale, 1));
+  }
+  78% {
+    opacity: 0.85;
+    transform: translate3d(calc(var(--sway, 20px) * 0.45), calc(var(--rise, 38vh) * -0.8), 0)
+      rotate(calc(var(--tilt, 6deg) * 0.4)) scale(calc(var(--scale, 1) * 0.96));
   }
   100% {
-    transform: translateX(calc(var(--sway, 30px) * 0.35)) rotate(0deg);
+    opacity: 0;
+    transform: translate3d(calc(var(--sway, 20px) * 0.15), calc(var(--rise, 38vh) * -1), 0)
+      scale(calc(var(--scale, 1) * 0.9));
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2132,4 +2181,37 @@ button.big {
 }
 .admin .code-pill {
   font-size: 16px;
+}
+
+/* Game master remote on the shared screen. Quiet, out of the way, but reachable
+   without opening a second tab. */
+.host-controls {
+  position: fixed;
+  right: 2vmin;
+  bottom: 2vmin;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  background: rgba(12, 11, 22, 0.86);
+  border: 1px solid var(--edge);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  max-width: min(92vw, 720px);
+  flex-wrap: wrap;
+  animation: enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.host-controls button {
+  min-height: 46px;
+  padding: 10px 16px;
+  font-size: 15px;
+}
+@media (max-width: 700px) {
+  .host-controls {
+    left: 2vmin;
+    right: 2vmin;
+    justify-content: center;
+  }
 }

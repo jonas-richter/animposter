@@ -586,6 +586,51 @@ async function main() {
   await tv.settle();
   check('TV zeigt das Podium', !!tv.container.querySelector('.podium'), tv.text().slice(0, 200));
 
+  console.log('9b) Mehrfachauswahl beim Themen-Voting');
+  const mcRoom = await api('/api/room', { method: 'POST' });
+  const mCode: string = mcRoom.data.code;
+  const mGm = mcRoom.data.token;
+  await api(`/api/room/${mCode}/action`, {
+    method: 'POST',
+    token: mGm,
+    body: { type: 'updateSettings', timerEnabled: false, multiTopicVote: true },
+  });
+  await api(`/api/room/${mCode}/join`, { method: 'POST', token: mGm, body: { name: 'Multi' } });
+  for (const n of ['Zwei', 'Drei', 'Vier']) {
+    await api(`/api/room/${mCode}/join`, { method: 'POST', body: { name: n } });
+  }
+  await api(`/api/room/${mCode}/action`, { method: 'POST', token: mGm, body: { type: 'startTopicVote' } });
+
+  const mc = await mountPhone('Multi', mCode, mGm);
+  await mc.settle();
+  check('Mehrfachmodus hat eigene Überschrift', mc.text().includes('Was kennt ihr'), mc.text().slice(0, 200));
+  check('Mehrere Themen wählbar', await mc.clickCandidate('Naruto'));
+  check('Zweites Thema wählbar', await mc.clickCandidate('One Piece'));
+  await mc.settle();
+  const picked = [...mc.container.querySelectorAll('.select-target.sel')].length;
+  check('Beide Auswahlen bleiben stehen', picked === 2, String(picked));
+  check('Anzahl wird angezeigt', mc.text().includes('2 ausgewählt'), mc.text().slice(0, 260));
+  check('Abwählen geht', await mc.clickCandidate('Naruto'));
+  await mc.settle();
+  check(
+    'Nach dem Abwählen bleibt eine Auswahl',
+    [...mc.container.querySelectorAll('.select-target.sel')].length === 1,
+  );
+
+  console.log('9c) Gamemaster-Steuerung auf dem TV-Screen');
+  const tvGm = await mountHost(mCode);
+  await tvGm.settle();
+  check(
+    'TV zeigt dem Gamemaster eine Fernbedienung',
+    !!tvGm.container.querySelector('.host-controls'),
+    tvGm.text().slice(0, 200),
+  );
+  check(
+    'Fernbedienung passt zur Phase',
+    tvGm.text().includes('Rollen verteilen'),
+    tvGm.text().slice(-160),
+  );
+
   console.log('10) Reaktionen');
   const reactPhone = await mountPhone('Reagierer', hCode, hGm);
   await reactPhone.settle();

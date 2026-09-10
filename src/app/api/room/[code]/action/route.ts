@@ -18,6 +18,7 @@ import {
   startRound,
   topicById,
   topicVoteWinner,
+  voteForTopic,
   transferGm,
 } from '@/lib/game';
 import { deleteRoom, getRoom, withRoom } from '@/lib/store';
@@ -148,7 +149,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
           const seat = ownSeat(room, device, body.seatId);
           const topicId = str(body.topicId, 'topicId');
           if (!topicById(room, topicId)) throw new GameError('Unbekanntes Thema.');
-          room.topicVotes[seat.id] = topicId;
+          voteForTopic(room, seat.id, topicId);
           return {};
         }
         case 'startRound': {
@@ -245,6 +246,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
           if (typeof body.impostorsKnow === 'boolean') {
             room.settings.impostorsKnow = body.impostorsKnow;
           }
+          if (typeof body.multiTopicVote === 'boolean') {
+            room.settings.multiTopicVote = body.multiTopicVote;
+            // The two modes count differently; a half-finished ballot would be
+            // meaningless after the switch.
+            room.topicVotes = {};
+          }
           if (typeof body.proposalsNeedApproval === 'boolean') {
             room.settings.proposalsNeedApproval = body.proposalsNeedApproval;
           }
@@ -339,8 +346,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
           const id = str(body.topicId, 'topicId');
           room.customTopics = room.customTopics.filter((t) => t.id !== id);
           if (room.currentTopicId === id) room.currentTopicId = null;
-          for (const [seatId, tid] of Object.entries(room.topicVotes)) {
-            if (tid === id) delete room.topicVotes[seatId];
+          for (const [seatId, chosen] of Object.entries(room.topicVotes)) {
+            const left = (chosen ?? []).filter((t) => t !== id);
+            if (left.length === 0) delete room.topicVotes[seatId];
+            else room.topicVotes[seatId] = left;
           }
           return {};
         }

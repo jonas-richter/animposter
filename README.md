@@ -202,6 +202,22 @@ deutlich im Interface. Nochmal antippen, und man ist zur nächsten Runde wieder 
 Ein Gamemaster, der gar keinen Namen eingetragen hat, leitet nur – er ist damit ebenfalls
 Zuschauer und sieht alle Rollen.
 
+### Der TV-Screen ist auch die Fernbedienung
+
+Öffnest du `/host/CODE` in dem Browser, in dem du Gamemaster bist, erscheint unten rechts eine
+kleine Leiste mit genau dem Knopf, der in der aktuellen Phase dran ist. Du brauchst also keine
+zwei Tabs: der Laptop am Tisch ist Hub und Steuerung zugleich, das Handy nur noch für deine
+eigene Karte — oder gar nicht, wenn du nicht mitspielst.
+
+Die öffentliche TV-Ansicht bleibt davon unberührt: sie enthält weiterhin keinerlei Rollen. Die
+Steuerung nutzt deine normale Spielersitzung, nicht den tokenfreien Feed.
+
+### Abstimmungsmodus „Was kennt ihr?“
+
+Im Zahnrad umschaltbar. Statt genau ein Universum zu wählen, tippt jeder alles an, was er kennt
+— gespielt wird, was die meisten kennen. Praktisch in einer Runde mit sehr unterschiedlichem
+Anime-Wissen. Auf einem geteilten Handy tippt jeder seine Auswahl und drückt dann „… ist fertig“.
+
 ### Anzahl der Impostor
 
 Stellt der Gamemaster in der Lobby ein (1 bis 3) – und nach jeder Auflösung erneut für die

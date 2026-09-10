@@ -124,9 +124,9 @@ export function buildView(room: Room, device: Device): RoomView {
       pending: t.approved === false,
     }));
 
-  const myTopicVotes: Record<string, string> = {};
+  const myTopicVotes: Record<string, string[]> = {};
   for (const id of mySeatIds) {
-    if (room.topicVotes[id]) myTopicVotes[id] = room.topicVotes[id];
+    if (room.topicVotes[id]?.length) myTopicVotes[id] = room.topicVotes[id];
   }
 
   const myRoles: MyRole[] = [];
@@ -166,6 +166,7 @@ export function buildView(room: Room, device: Device): RoomView {
     myVotes,
     // Settings drive the discreet gear menu -> GM only (spectators may see them too).
     settings: gm || spectating ? { ...room.settings } : undefined,
+    multiTopicVote: room.settings.multiTopicVote,
     topicReveal:
       room.phase === 'topicReveal' && round
         ? {
@@ -177,6 +178,12 @@ export function buildView(room: Room, device: Device): RoomView {
     results: showEverything ? buildResults(room) : undefined,
     spectating,
     deadline: room.deadline,
+    phaseSeconds:
+      room.phase === 'discussion'
+        ? room.settings.discussionSec
+        : room.phase === 'voting'
+          ? room.settings.votingSec
+          : null,
     reactions: pruneReactions(room),
     standings: room.phase === 'gameOver' ? standings(room) : undefined,
     targetReached: targetReached(room),

@@ -34,12 +34,12 @@ export function ReactionLayer({ reactions }: { reactions: Reaction[] }) {
     const withPos = fresh.map((r) => ({
       ...r,
       x: 8 + Math.random() * 78,
-      dur: 2800 + Math.random() * 1400,
-      sway: 26 + Math.random() * 46,
+      dur: 3800 + Math.random() * 1600,
+      sway: 18 + Math.random() * 30,
       dir: Math.random() > 0.5 ? 1 : -1,
-      tilt: (Math.random() - 0.5) * 26,
-      scale: 0.82 + Math.random() * 0.5,
-      rise: 42 + Math.random() * 22,
+      tilt: (Math.random() - 0.5) * 14,
+      scale: 0.9 + Math.random() * 0.35,
+      rise: 34 + Math.random() * 16,
     }));
     setLive((cur) => [...cur, ...withPos].slice(-24));
     const timers = withPos.map((r) =>

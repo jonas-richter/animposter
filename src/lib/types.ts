@@ -100,6 +100,8 @@ export interface Settings {
   impostorCount: number;
   /** When on, player suggestions are hidden until the game master waves them through. */
   proposalsNeedApproval: boolean;
+  /** Approval voting: tick every universe you know instead of picking one. */
+  multiTopicVote: boolean;
   /** Run discussion and voting on a countdown so nobody has to play referee. */
   timerEnabled: boolean;
   discussionSec: number;
@@ -145,8 +147,11 @@ export interface Room {
   seats: Seat[];
   gmDeviceId: string;
   settings: Settings;
-  /** seatId -> topicId */
-  topicVotes: Record<string, string>;
+  /**
+   * seatId -> chosen topic ids. Always an array: in the normal mode it holds
+   * exactly one, in "Was kennt ihr?" mode a player ticks everything they know.
+   */
+  topicVotes: Record<string, string[]>;
   /** Topic chosen by the GM for the running round. */
   currentTopicId: string | null;
   round: Round | null;
@@ -248,8 +253,8 @@ export interface RoomView {
   mySeatIds: string[];
   seats: SeatPublic[];
   topics: TopicMeta[];
-  /** seatId -> topicId, only for my own seats. */
-  myTopicVotes: Record<string, string>;
+  /** seatId -> chosen topic ids, only for my own seats. */
+  myTopicVotes: Record<string, string[]>;
   currentTopicId: string | null;
   /** Roles for my own seats (redacted). Empty before the reveal phase. */
   myRoles: MyRole[];
@@ -257,6 +262,11 @@ export interface RoomView {
   myVotes: Record<string, string[]>;
   /** Settings are only sent to the GM (and spectators) so the gear menu stays discreet. */
   settings?: Settings;
+  /**
+   * The voting mode is NOT secret - everyone has to know whether they pick one
+   * universe or tick everything they know.
+   */
+  multiTopicVote: boolean;
   /** Winning-topic announcement, only during the topicReveal phase. */
   topicReveal?: {
     name: string;
@@ -273,6 +283,8 @@ export interface RoomView {
   waitingCount: number;
   /** Epoch ms when the phase advances by itself, or null. */
   deadline: number | null;
+  /** Length of the running phase in seconds - needed to draw the progress bar. */
+  phaseSeconds: number | null;
   /** Emotes from the last few seconds. */
   reactions: Reaction[];
   /** Final standings, only in the gameOver phase. */

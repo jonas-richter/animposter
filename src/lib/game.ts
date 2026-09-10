@@ -67,6 +67,7 @@ export function createRoom(code: string): { room: Room; device: Device } {
       proposalsNeedApproval: false,
       // On by default: the game should run itself, the game master is there to
       // fix things, not to press "next" four times a round.
+      multiTopicVote: false,
       timerEnabled: true,
       discussionSec: 120,
       votingSec: 60,
@@ -383,10 +384,25 @@ export function removeDevice(room: Room, deviceId: string, successorDeviceId?: s
 
 export function topicTally(room: Room): Record<string, number> {
   const tally: Record<string, number> = {};
-  for (const topicId of Object.values(room.topicVotes)) {
-    tally[topicId] = (tally[topicId] ?? 0) + 1;
+  for (const chosen of Object.values(room.topicVotes)) {
+    for (const topicId of chosen ?? []) tally[topicId] = (tally[topicId] ?? 0) + 1;
   }
   return tally;
+}
+
+/**
+ * Record a vote. In single mode the seat's choice is replaced; in approval mode
+ * the topic is toggled, so a player can tick everything they know.
+ */
+export function voteForTopic(room: Room, seatId: string, topicId: string): void {
+  if (!room.settings.multiTopicVote) {
+    room.topicVotes[seatId] = [topicId];
+    return;
+  }
+  const current = room.topicVotes[seatId] ?? [];
+  room.topicVotes[seatId] = current.includes(topicId)
+    ? current.filter((t) => t !== topicId)
+    : [...current, topicId].slice(0, 20);
 }
 
 /** Topic with the most votes; ties are broken randomly. Null when nobody voted. */
@@ -434,10 +450,13 @@ export function syncDeadline(room: Room): void {
     case 'topicVote': {
       const active = activeSeats(room);
       const everyoneVoted =
-        active.length > 0 && active.every((s) => room.topicVotes[s.id]);
+        active.length > 0 && active.every((s) => (room.topicVotes[s.id] ?? []).length > 0);
+      // In approval mode people keep ticking boxes, so give them longer before
+      // the round starts by itself.
+      const pause = room.settings.multiTopicVote ? 6000 : TOPIC_VOTE_PAUSE_MS;
       const enough = active.length >= room.settings.impostorCount + 2;
       if (everyoneVoted && enough) {
-        if (room.deadlineAction !== 'startRound') set(TOPIC_VOTE_PAUSE_MS, 'startRound');
+        if (room.deadlineAction !== 'startRound') set(pause, 'startRound');
       } else clear();
       return;
     }

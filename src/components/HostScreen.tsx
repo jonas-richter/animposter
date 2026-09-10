@@ -1,15 +1,22 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { loadToken, sendAction } from '@/lib/client';
 import type { HostView } from '@/lib/view';
+import type { RoomView } from '@/lib/types';
 import CharacterArt from './CharacterArt';
 import Countdown from './Countdown';
 import Podium from './Podium';
 import { ReactionLayer } from './Reactions';
 import { Avatar } from './ui';
 
-// The shared screen: a TV or laptop in the middle of the table. Read-only, no
-// token, and by construction it never receives a role while a round is running.
+// The shared screen: a TV or laptop in the middle of the table.
+//
+// The public feed carries no token and no roles. But if THIS browser happens to
+// hold the game master's session for the room, the screen also grows a control
+// bar - so the host laptop is both the hub and the remote, instead of forcing
+// you to juggle two tabs. Those controls use the normal player API with the
+// normal token; the public feed stays exactly as dumb as it was.
 
 const POLL: Record<HostView['phase'], number> = {
   lobby: 2000,
@@ -27,6 +34,51 @@ export default function HostScreen({ code }: { code: string }) {
   const [error, setError] = useState('');
   const phase = useRef<HostView['phase']>('lobby');
   const busy = useRef(false);
+
+  // Optional: game master controls, when this browser owns the GM session.
+  const [token, setToken] = useState<string | null>(null);
+  const [isGm, setIsGm] = useState(false);
+  const [acting, setActing] = useState(false);
+
+  useEffect(() => {
+    setToken(loadToken(code));
+  }, [code]);
+
+  useEffect(() => {
+    if (!token) return;
+    let stopped = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/room/${code}/state`, {
+          headers: { 'x-impostor-token': token },
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { view: RoomView };
+        if (!stopped) setIsGm(data.view.isGm);
+      } catch {
+        /* no controls, just the hub */
+      }
+    })();
+    return () => {
+      stopped = true;
+    };
+  }, [code, token, view?.phase]);
+
+  const control = useCallback(
+    async (payload: Record<string, unknown>) => {
+      if (!token) return;
+      setActing(true);
+      try {
+        await sendAction(code, token, payload);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Fehler');
+      } finally {
+        setActing(false);
+      }
+    },
+    [code, token],
+  );
 
   useEffect(() => {
     let stopped = false;
@@ -236,12 +288,81 @@ export default function HostScreen({ code }: { code: string }) {
         </div>
       )}
 
+      {isGm && <HostControls view={view} busy={acting} onAct={control} />}
+
       {view.waitingCount > 0 && (
         <div className="host-waiting">{view.waitingCount} warten auf die nächste Runde</div>
       )}
 
       <ReactionLayer reactions={view.reactions} />
     </main>
+  );
+}
+
+/** Compact remote for the game master, pinned to the bottom of the shared screen. */
+function HostControls({
+  view,
+  busy,
+  onAct,
+}: {
+  view: HostView;
+  busy: boolean;
+  onAct: (payload: Record<string, unknown>) => void;
+}) {
+  const playing = view.seats.filter((s) => !s.spectator && !s.waiting);
+  const buttons: { label: string; payload: Record<string, unknown>; primary?: boolean }[] = [];
+
+  switch (view.phase) {
+    case 'lobby':
+      buttons.push({ label: 'Los geht’s', payload: { type: 'startTopicVote' }, primary: true });
+      break;
+    case 'topicVote':
+      buttons.push({ label: 'Rollen verteilen', payload: { type: 'startRound' }, primary: true });
+      buttons.push({ label: 'Zurück zur Lobby', payload: { type: 'backToLobby' } });
+      break;
+    case 'topicReveal':
+      buttons.push({ label: 'Rollen austeilen', payload: { type: 'startReveal' }, primary: true });
+      break;
+    case 'reveal':
+      buttons.push({
+        label: `Diskussion starten (${playing.filter((s) => s.revealed).length}/${playing.length})`,
+        payload: { type: 'startDiscussion' },
+        primary: true,
+      });
+      break;
+    case 'discussion':
+      buttons.push({ label: 'Abstimmung starten', payload: { type: 'startVoting' }, primary: true });
+      break;
+    case 'voting':
+      buttons.push({
+        label: `Auflösen (${playing.filter((s) => s.hasVoted).length}/${playing.length})`,
+        payload: { type: 'finishRound' },
+        primary: true,
+      });
+      break;
+    case 'results':
+      buttons.push({ label: 'Nächste Runde', payload: { type: 'nextRound' }, primary: true });
+      buttons.push({ label: '🏆 Spiel beenden', payload: { type: 'endGame' } });
+      break;
+    case 'gameOver':
+      buttons.push({ label: 'Neues Spiel', payload: { type: 'restartGame' }, primary: true });
+      break;
+  }
+
+  return (
+    <div className="host-controls">
+      <span className="eyebrow">Gamemaster</span>
+      {buttons.map((b) => (
+        <button
+          key={b.label}
+          className={b.primary ? 'grad go' : ''}
+          disabled={busy}
+          onClick={() => onAct(b.payload)}
+        >
+          {b.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
